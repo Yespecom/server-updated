@@ -151,12 +151,22 @@ router.post("/send-otp", async (req, res) => {
 
 async function sendFirebaseOTP(phoneNumber) {
   try {
-    const { getFirebaseAuth } = require("../../config/firebase")
     const auth = getFirebaseAuth()
 
-    // Get access token for Firebase Identity Toolkit API
     const { GoogleAuth } = require("google-auth-library")
     const googleAuth = new GoogleAuth({
+      credentials: {
+        type: process.env.FIREBASE_TYPE,
+        project_id: process.env.FIREBASE_PROJECT_ID,
+        private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
+        private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+        client_email: process.env.FIREBASE_CLIENT_EMAIL,
+        client_id: process.env.FIREBASE_CLIENT_ID,
+        auth_uri: process.env.FIREBASE_AUTH_URI,
+        token_uri: process.env.FIREBASE_TOKEN_URI,
+        auth_provider_x509_cert_url: process.env.FIREBASE_AUTH_PROVIDER_X509_CERT_URL,
+        client_x509_cert_url: process.env.FIREBASE_CLIENT_X509_CERT_URL,
+      },
       scopes: ["https://www.googleapis.com/auth/cloud-platform"],
     })
 
@@ -360,6 +370,18 @@ async function verifyFirebaseOTP(phoneNumber, code, sessionInfo) {
   try {
     const { GoogleAuth } = require("google-auth-library")
     const googleAuth = new GoogleAuth({
+      credentials: {
+        type: process.env.FIREBASE_TYPE,
+        project_id: process.env.FIREBASE_PROJECT_ID,
+        private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
+        private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+        client_email: process.env.FIREBASE_CLIENT_EMAIL,
+        client_id: process.env.FIREBASE_CLIENT_ID,
+        auth_uri: process.env.FIREBASE_AUTH_URI,
+        token_uri: process.env.FIREBASE_TOKEN_URI,
+        auth_provider_x509_cert_url: process.env.FIREBASE_AUTH_PROVIDER_X509_CERT_URL,
+        client_x509_cert_url: process.env.FIREBASE_CLIENT_X509_CERT_URL,
+      },
       scopes: ["https://www.googleapis.com/auth/cloud-platform"],
     })
 
@@ -428,14 +450,14 @@ router.get("/firebase-config", (req, res) => {
     if (missingFields.length > 0) {
       return res.status(500).json({
         error: "Firebase configuration incomplete",
-        missingFields,
+        missingFields: missingFields,
         code: "FIREBASE_CONFIG_INCOMPLETE",
       })
     }
 
     res.json({
       success: true,
-      config,
+      config: config,
       message: "Firebase configuration ready for phone authentication",
     })
   } catch (error) {
