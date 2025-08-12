@@ -13,12 +13,28 @@ const initializeFirebase = () => {
 
     console.log("🔥 Initializing Firebase Admin SDK...")
 
+    let privateKey = process.env.FIREBASE_PRIVATE_KEY
+
+    if (!privateKey) {
+      throw new Error("FIREBASE_PRIVATE_KEY environment variable is not set")
+    }
+
+    // Handle different private key formats
+    if (privateKey.includes("\\n")) {
+      privateKey = privateKey.replace(/\\n/g, "\n")
+    }
+
+    // Validate private key format
+    if (!privateKey.includes("-----BEGIN PRIVATE KEY-----") || !privateKey.includes("-----END PRIVATE KEY-----")) {
+      throw new Error("Invalid private key format. Must include BEGIN and END markers.")
+    }
+
     // Firebase configuration from environment variables
     const firebaseConfig = {
       type: process.env.FIREBASE_TYPE || "service_account",
       project_id: process.env.FIREBASE_PROJECT_ID,
       private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
-      private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+      private_key: privateKey,
       client_email: process.env.FIREBASE_CLIENT_EMAIL,
       client_id: process.env.FIREBASE_CLIENT_ID,
       auth_uri: process.env.FIREBASE_AUTH_URI || "https://accounts.google.com/o/oauth2/auth",
@@ -33,6 +49,9 @@ const initializeFirebase = () => {
       hasPrivateKey: !!firebaseConfig.private_key,
       hasClientEmail: !!firebaseConfig.client_email,
       privateKeyLength: firebaseConfig.private_key?.length || 0,
+      privateKeyFormat: firebaseConfig.private_key?.includes("-----BEGIN PRIVATE KEY-----")
+        ? "Valid PEM"
+        : "Invalid format",
     })
 
     // Validate required Firebase configuration
@@ -63,6 +82,16 @@ const initializeFirebase = () => {
       code: error.code,
       stack: error.stack,
     })
+
+    if (error.message.includes("private key") || error.message.includes("PEM")) {
+      console.error("🔧 Private Key Fix Guide:")
+      console.error("1. Go to Firebase Console > Project Settings > Service Accounts")
+      console.error("2. Click 'Generate new private key' and download the JSON file")
+      console.error("3. Copy the 'private_key' value (including quotes) to FIREBASE_PRIVATE_KEY in .env")
+      console.error("4. Make sure the key includes -----BEGIN PRIVATE KEY----- and -----END PRIVATE KEY-----")
+      console.error("5. Replace \\n with actual newlines or use double backslashes \\\\n")
+    }
+
     return null
   }
 }
