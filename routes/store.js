@@ -5,6 +5,7 @@ const router = express.Router()
 const authRoutes = require("./store/auth")
 const ordersRoutes = require("./store/orders")
 const paymentsRoutes = require("./store/payments")
+const firebaseOtpRoutes = require("./store/firebase-otp")
 
 // Add logging middleware for all store routes
 router.use((req, res, next) => {
@@ -19,6 +20,7 @@ router.use((req, res, next) => {
 router.use("/auth", authRoutes)
 router.use("/orders", ordersRoutes)
 router.use("/payments", paymentsRoutes)
+router.use("/firebase-otp", firebaseOtpRoutes)
 
 // Test endpoint for store routes
 router.get("/test", (req, res) => {
@@ -43,6 +45,8 @@ router.get("/test", (req, res) => {
       "POST /orders",
       "GET /orders",
       "POST /payments/create-order",
+      "POST /firebase-otp/send",
+      "POST /firebase-otp/verify",
     ],
   })
 })
