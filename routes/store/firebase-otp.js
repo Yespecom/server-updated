@@ -3,6 +3,7 @@ const rateLimit = require("express-rate-limit")
 const AuthUtils = require("../../utils/auth")
 const CustomerOTP = require("../../models/CustomerOTP")
 const { getFirebaseAuth, getUserByPhone, createUserWithPhone, createCustomToken } = require("../../config/firebase")
+const RecaptchaUtils = require("../../utils/recaptcha")
 const router = express.Router({ mergeParams: true })
 
 // Rate limiting for OTP endpoints
@@ -18,8 +19,8 @@ const otpRateLimit = rateLimit({
   legacyHeaders: false,
 })
 
-// Apply rate limiting to OTP endpoints
-router.use(["/send-otp", "/verify-otp"], otpRateLimit)
+// Apply rate limiting and reCAPTCHA to OTP endpoints
+router.use(["/send-otp", "/verify-otp"], otpRateLimit, RecaptchaUtils.middleware(true))
 
 // Enhanced logging middleware
 router.use((req, res, next) => {
@@ -34,6 +35,7 @@ router.post("/send-otp", async (req, res) => {
     const { phone, purpose = "login", name } = req.body
 
     console.log(`📱 Firebase OTP request for store: ${req.storeId}, phone: ${phone}`)
+    console.log(`🔒 reCAPTCHA verified with score: ${req.recaptcha?.score || "N/A"}`)
 
     // Validation
     if (!phone) {
@@ -113,6 +115,7 @@ router.post("/send-otp", async (req, res) => {
           storeId: req.storeId,
           firebaseUid: firebaseUid,
           firebaseSessionInfo: firebaseSMSResult.sessionInfo, // Store Firebase session info
+          recaptchaScore: req.recaptcha?.score, // Store reCAPTCHA score for audit
         },
         10,
         null, // No custom OTP - Firebase handles this
@@ -218,6 +221,7 @@ router.post("/verify-otp", async (req, res) => {
     const { phone, otp, sessionInfo, purpose = "login", name, email, rememberMe } = req.body
 
     console.log(`🔍 Firebase OTP verification for store: ${req.storeId}, phone: ${phone}`)
+    console.log(`🔒 reCAPTCHA verified with score: ${req.recaptcha?.score || "N/A"}`)
 
     // Validation
     if (!phone || !otp) {
@@ -464,6 +468,32 @@ router.get("/firebase-config", (req, res) => {
     console.error("❌ Error getting Firebase config:", error)
     res.status(500).json({
       error: "Failed to get Firebase configuration",
+      code: "CONFIG_ERROR",
+    })
+  }
+})
+
+// Get reCAPTCHA configuration for client
+router.get("/recaptcha-config", (req, res) => {
+  try {
+    const siteKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY
+
+    if (!siteKey) {
+      return res.status(500).json({
+        error: "reCAPTCHA not configured",
+        code: "RECAPTCHA_NOT_CONFIGURED",
+      })
+    }
+
+    res.json({
+      success: true,
+      siteKey: siteKey,
+      message: "reCAPTCHA configuration ready",
+    })
+  } catch (error) {
+    console.error("❌ Error getting reCAPTCHA config:", error)
+    res.status(500).json({
+      error: "Failed to get reCAPTCHA configuration",
       code: "CONFIG_ERROR",
     })
   }
