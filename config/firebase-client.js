@@ -59,7 +59,7 @@ const getFirebaseClientAuth = () => {
   return auth
 }
 
-// Send OTP to phone number
+// Send OTP to phone number using Firebase Auth
 const sendOTPToPhone = async (phoneNumber, recaptchaVerifier) => {
   try {
     console.log(`📱 Sending OTP to phone: ${phoneNumber}`)
@@ -69,9 +69,10 @@ const sendOTPToPhone = async (phoneNumber, recaptchaVerifier) => {
       throw new Error("Firebase client not initialized")
     }
 
+    // Use Firebase's signInWithPhoneNumber - this sends REAL SMS
     const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier)
 
-    console.log("✅ OTP sent successfully")
+    console.log("✅ OTP sent successfully via Firebase")
     return {
       success: true,
       verificationId: confirmationResult.verificationId,
@@ -87,18 +88,16 @@ const sendOTPToPhone = async (phoneNumber, recaptchaVerifier) => {
   }
 }
 
-// Verify OTP code
-const verifyOTPCode = async (verificationId, otpCode) => {
+// Verify OTP code and get Firebase ID token
+const verifyOTPCode = async (confirmationResult, otpCode) => {
   try {
     console.log(`🔍 Verifying OTP code: ${otpCode}`)
 
-    const auth = getFirebaseClientAuth()
-    if (!auth) {
-      throw new Error("Firebase client not initialized")
-    }
+    // Confirm the OTP with Firebase
+    const result = await confirmationResult.confirm(otpCode)
 
-    const credential = PhoneAuthProvider.credential(verificationId, otpCode)
-    const result = await signInWithCredential(auth, credential)
+    // Get the ID token
+    const idToken = await result.user.getIdToken()
 
     console.log("✅ OTP verified successfully")
     return {
@@ -106,6 +105,7 @@ const verifyOTPCode = async (verificationId, otpCode) => {
       user: result.user,
       phoneNumber: result.user.phoneNumber,
       uid: result.user.uid,
+      idToken: idToken, // This is what the server needs
     }
   } catch (error) {
     console.error("❌ Error verifying OTP:", error)
@@ -117,20 +117,12 @@ const verifyOTPCode = async (verificationId, otpCode) => {
   }
 }
 
-// Create reCAPTCHA verifier with configurable site key
-const createRecaptchaVerifier = (containerId = "recaptcha-container", siteKey = null) => {
+// Create reCAPTCHA verifier for Firebase Auth
+const createRecaptchaVerifier = (containerId = "recaptcha-container") => {
   try {
     const auth = getFirebaseClientAuth()
     if (!auth) {
       throw new Error("Firebase client not initialized")
-    }
-
-    // Use provided site key or fallback to environment variable
-    const recaptchaSiteKey = siteKey || process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY
-
-    if (!recaptchaSiteKey) {
-      console.error("❌ reCAPTCHA site key not configured")
-      throw new Error("reCAPTCHA site key not configured")
     }
 
     const recaptchaVerifier = new RecaptchaVerifier(auth, containerId, {
@@ -143,7 +135,7 @@ const createRecaptchaVerifier = (containerId = "recaptcha-container", siteKey = 
       },
     })
 
-    console.log(`✅ reCAPTCHA verifier created with site key: ${recaptchaSiteKey.substring(0, 20)}...`)
+    console.log("✅ reCAPTCHA verifier created for Firebase Auth")
     return recaptchaVerifier
   } catch (error) {
     console.error("❌ Error creating reCAPTCHA verifier:", error)
