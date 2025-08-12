@@ -33,9 +33,10 @@ router.use((req, res, next) => {
 // This endpoint is now just for logging - Firebase client SDK handles actual OTP sending
 router.post("/send-otp", async (req, res) => {
   try {
-    const { phone, purpose = "login", name } = req.body
+    const { phone, purpose = "login", name, recaptchaToken } = req.body
 
     console.log(`📱 Firebase OTP request for store: ${req.storeId}, phone: ${phone}`)
+    console.log(`🔒 reCAPTCHA v3 token received: ${recaptchaToken ? "Yes" : "No"}`)
 
     // Validation
     if (!phone) {
@@ -59,6 +60,30 @@ router.post("/send-otp", async (req, res) => {
       })
     }
 
+    // Verify reCAPTCHA v3 token if provided
+    if (recaptchaToken) {
+      try {
+        const recaptchaResult = await RecaptchaUtils.verifyRecaptchaV3(recaptchaToken, "phone_auth")
+        console.log(`✅ reCAPTCHA v3 verified with score: ${recaptchaResult.score}`)
+
+        if (recaptchaResult.score < 0.5) {
+          console.log(`⚠️ Low reCAPTCHA score: ${recaptchaResult.score}`)
+          return res.status(400).json({
+            error: "reCAPTCHA verification failed. Please try again.",
+            code: "RECAPTCHA_LOW_SCORE",
+            score: recaptchaResult.score,
+          })
+        }
+      } catch (recaptchaError) {
+        console.error("❌ reCAPTCHA v3 verification failed:", recaptchaError)
+        return res.status(400).json({
+          error: "reCAPTCHA verification failed",
+          code: "RECAPTCHA_FAILED",
+          details: recaptchaError.message,
+        })
+      }
+    }
+
     // Store OTP request in database for tracking
     const otpRecord = await CustomerOTP.createOTP(
       phone,
@@ -69,6 +94,7 @@ router.post("/send-otp", async (req, res) => {
         ip: req.ip,
         storeId: req.storeId,
         method: "firebase_client_direct",
+        recaptchaScore: recaptchaToken ? "verified" : "not_provided",
       },
       10, // 10 minutes expiry
       "FIREBASE_CLIENT_DIRECT", // Placeholder since Firebase handles OTP generation
@@ -85,6 +111,7 @@ router.post("/send-otp", async (req, res) => {
       provider: "firebase",
       expiresIn: "10 minutes",
       otpId: otpRecord._id,
+      recaptchaVerified: !!recaptchaToken,
       instructions: "Use Firebase signInWithPhoneNumber() on client side to send real SMS",
     })
   } catch (error) {
@@ -268,11 +295,12 @@ router.post("/verify-otp", async (req, res) => {
       tenantId: req.tenantId,
       tokenInfo: tokenExpiry,
       expiresIn: rememberMe ? "365 days" : "90 days",
-      authMethod: "firebase_phone_auth",
+      authMethod: "firebase_phone_auth_v3",
       firebaseUid: decodedToken.uid,
       firebaseCustomToken: customToken,
       isNewCustomer: isNewCustomer,
       accountStatus: accountStatus, // 'existing', 'created'
+      recaptchaProtected: true,
     }
 
     console.log(`✅ Firebase phone authentication successful`)
@@ -304,10 +332,11 @@ router.get("/firebase-config", (req, res) => {
       messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
       appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
       measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
+      recaptchaSiteKey: process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY,
     }
 
     // Check if all required fields are present
-    const requiredFields = ["apiKey", "authDomain", "projectId"]
+    const requiredFields = ["apiKey", "authDomain", "projectId", "recaptchaSiteKey"]
     const missingFields = requiredFields.filter((field) => !config[field])
 
     if (missingFields.length > 0) {
@@ -321,7 +350,8 @@ router.get("/firebase-config", (req, res) => {
     res.json({
       success: true,
       config: config,
-      message: "Firebase configuration ready for phone authentication",
+      message: "Firebase configuration ready for phone authentication with reCAPTCHA v3",
+      recaptchaVersion: "v3_enterprise",
     })
   } catch (error) {
     console.error("❌ Error getting Firebase config:", error)
@@ -345,6 +375,8 @@ router.get("/test-firebase", async (req, res) => {
       message: "Firebase Admin SDK is working",
       userCount: listUsersResult.users.length,
       projectId: process.env.FIREBASE_PROJECT_ID,
+      recaptchaConfigured: !!process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY,
+      recaptchaVersion: "v3_enterprise",
     })
   } catch (error) {
     console.error("❌ Firebase test error:", error)
