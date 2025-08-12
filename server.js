@@ -10,9 +10,9 @@ dotenv.config()
 const app = express()
 const PORT = process.env.PORT || 5000
 
-app.set("trust proxy", true)
+// Instead of trusting all proxies, only trust the first proxy (nginx)
+app.set("trust proxy", 1)
 
-// Middleware
 app.use(cors())
 
 // Enhanced JSON parsing with better error handling
