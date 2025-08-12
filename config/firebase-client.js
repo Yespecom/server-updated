@@ -117,12 +117,20 @@ const verifyOTPCode = async (verificationId, otpCode) => {
   }
 }
 
-// Create reCAPTCHA verifier
-const createRecaptchaVerifier = (containerId = "recaptcha-container") => {
+// Create reCAPTCHA verifier with configurable site key
+const createRecaptchaVerifier = (containerId = "recaptcha-container", siteKey = null) => {
   try {
     const auth = getFirebaseClientAuth()
     if (!auth) {
       throw new Error("Firebase client not initialized")
+    }
+
+    // Use provided site key or fallback to environment variable
+    const recaptchaSiteKey = siteKey || process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY
+
+    if (!recaptchaSiteKey) {
+      console.error("❌ reCAPTCHA site key not configured")
+      throw new Error("reCAPTCHA site key not configured")
     }
 
     const recaptchaVerifier = new RecaptchaVerifier(auth, containerId, {
@@ -135,10 +143,19 @@ const createRecaptchaVerifier = (containerId = "recaptcha-container") => {
       },
     })
 
+    console.log(`✅ reCAPTCHA verifier created with site key: ${recaptchaSiteKey.substring(0, 20)}...`)
     return recaptchaVerifier
   } catch (error) {
     console.error("❌ Error creating reCAPTCHA verifier:", error)
     return null
+  }
+}
+
+// Get reCAPTCHA configuration
+const getRecaptchaConfig = () => {
+  return {
+    siteKey: process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY,
+    configured: !!process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY,
   }
 }
 
@@ -156,6 +173,7 @@ const isFirebaseClientConfigured = () => {
     hasApiKey: !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
     hasAuthDomain: !!process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
     hasProjectId: !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    hasRecaptchaSiteKey: !!process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY,
   })
 
   return configured
@@ -167,6 +185,7 @@ module.exports = {
   sendOTPToPhone,
   verifyOTPCode,
   createRecaptchaVerifier,
+  getRecaptchaConfig,
   isFirebaseClientConfigured,
   firebaseConfig,
 }
