@@ -985,4 +985,7 @@ router.post("/refresh-token", authenticateCustomer, async (req, res) => {
   }
 })
 
+const firebaseOtpRoutes = require("./firebase-otp")
+router.use("/firebase-otp", firebaseOtpRoutes)
+
 module.exports = router
