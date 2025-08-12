@@ -14,9 +14,29 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig)
 export const auth = getAuth(app)
 
-// Create reCAPTCHA verifier
+// Global variable to track current verifier
+let currentVerifier: RecaptchaVerifier | null = null
+
+// Create reCAPTCHA verifier with proper cleanup
 export const createRecaptchaVerifier = (containerId = "recaptcha-container") => {
-  return new RecaptchaVerifier(auth, containerId, {
+  // Clear any existing verifier
+  if (currentVerifier) {
+    try {
+      currentVerifier.clear()
+    } catch (error) {
+      console.log("Previous verifier already cleared")
+    }
+    currentVerifier = null
+  }
+
+  // Clear the container
+  const container = document.getElementById(containerId)
+  if (container) {
+    container.innerHTML = ""
+  }
+
+  // Create new verifier
+  currentVerifier = new RecaptchaVerifier(auth, containerId, {
     size: "invisible",
     callback: (response: string) => {
       console.log("✅ reCAPTCHA solved:", response.substring(0, 20) + "...")
@@ -25,6 +45,20 @@ export const createRecaptchaVerifier = (containerId = "recaptcha-container") => 
       console.log("❌ reCAPTCHA expired")
     },
   })
+
+  return currentVerifier
+}
+
+// Clear current verifier
+export const clearRecaptchaVerifier = () => {
+  if (currentVerifier) {
+    try {
+      currentVerifier.clear()
+    } catch (error) {
+      console.log("Verifier already cleared")
+    }
+    currentVerifier = null
+  }
 }
 
 export { signInWithPhoneNumber, type ConfirmationResult }
