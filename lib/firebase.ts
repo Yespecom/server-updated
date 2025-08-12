@@ -14,15 +14,15 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig)
 export const auth = getAuth(app)
 
-// Create reCAPTCHA v3 verifier
+// Create reCAPTCHA verifier
 export const createRecaptchaVerifier = (containerId = "recaptcha-container") => {
   return new RecaptchaVerifier(auth, containerId, {
     size: "invisible",
     callback: (response: string) => {
-      console.log("✅ reCAPTCHA v3 solved:", response.substring(0, 20) + "...")
+      console.log("✅ reCAPTCHA solved:", response.substring(0, 20) + "...")
     },
     "expired-callback": () => {
-      console.log("❌ reCAPTCHA v3 expired")
+      console.log("❌ reCAPTCHA expired")
     },
   })
 }
