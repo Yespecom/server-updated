@@ -19,7 +19,7 @@ const otpRateLimit = rateLimit({
   legacyHeaders: false,
 })
 
-// Apply rate limiting to OTP endpoints (removed reCAPTCHA middleware from here)
+// Apply rate limiting to OTP endpoints
 router.use(["/send-otp", "/verify-otp"], otpRateLimit)
 
 // Enhanced logging middleware
@@ -30,13 +30,12 @@ router.use((req, res, next) => {
   next()
 })
 
-// Send OTP using Firebase client SDK (this endpoint just validates and logs)
+// This endpoint is now just for logging - Firebase client SDK handles actual OTP sending
 router.post("/send-otp", async (req, res) => {
   try {
-    const { phone, purpose = "login", name, recaptchaToken } = req.body
+    const { phone, purpose = "login", name } = req.body
 
     console.log(`📱 Firebase OTP request for store: ${req.storeId}, phone: ${phone}`)
-    console.log(`🔒 reCAPTCHA token received: ${recaptchaToken ? "Yes" : "No"}`)
 
     // Validation
     if (!phone) {
@@ -60,23 +59,6 @@ router.post("/send-otp", async (req, res) => {
       })
     }
 
-    // Verify reCAPTCHA if token is provided
-    if (recaptchaToken) {
-      const clientIP = req.ip || req.connection.remoteAddress
-      const recaptchaResult = await RecaptchaUtils.verifyRecaptcha(recaptchaToken, clientIP)
-
-      if (!recaptchaResult.success) {
-        console.error("❌ reCAPTCHA verification failed:", recaptchaResult.error)
-        return res.status(400).json({
-          error: "reCAPTCHA verification failed",
-          details: recaptchaResult.error,
-          code: "RECAPTCHA_FAILED",
-        })
-      }
-
-      console.log(`✅ reCAPTCHA verified with score: ${recaptchaResult.score}`)
-    }
-
     // Store OTP request in database for tracking
     const otpRecord = await CustomerOTP.createOTP(
       phone,
@@ -86,27 +68,27 @@ router.post("/send-otp", async (req, res) => {
         userAgent: req.get("User-Agent"),
         ip: req.ip,
         storeId: req.storeId,
-        method: "firebase_client",
-        recaptchaScore: recaptchaToken ? "verified" : "not_provided",
+        method: "firebase_client_direct",
       },
       10, // 10 minutes expiry
-      "FIREBASE_CLIENT", // Placeholder since Firebase handles OTP generation
+      "FIREBASE_CLIENT_DIRECT", // Placeholder since Firebase handles OTP generation
     )
 
     console.log(`✅ OTP request logged for ${phone}`)
 
     res.json({
       success: true,
-      message: "OTP request processed. Firebase will send SMS directly.",
+      message: "Ready for Firebase phone authentication. Use Firebase client SDK to send OTP.",
       phone: phone,
       purpose: purpose,
-      method: "firebase_client_sdk",
+      method: "firebase_client_direct",
       provider: "firebase",
       expiresIn: "10 minutes",
-      otpId: otpRecord._id, // For tracking verification
+      otpId: otpRecord._id,
+      instructions: "Use Firebase signInWithPhoneNumber() on client side to send real SMS",
     })
   } catch (error) {
-    console.error("❌ Firebase OTP send error:", error)
+    console.error("❌ Firebase OTP request error:", error)
     res.status(500).json({
       error: "Failed to process OTP request",
       details: error.message,
@@ -115,13 +97,12 @@ router.post("/send-otp", async (req, res) => {
   }
 })
 
-// Verify OTP sent by Firebase client SDK
+// Verify Firebase ID token (after client-side OTP verification)
 router.post("/verify-otp", async (req, res) => {
   try {
-    const { phone, otp, firebaseIdToken, purpose = "login", name, email, rememberMe, recaptchaToken } = req.body
+    const { phone, firebaseIdToken, purpose = "login", name, email, rememberMe } = req.body
 
-    console.log(`🔍 Firebase OTP verification for store: ${req.storeId}, phone: ${phone}`)
-    console.log(`🔒 reCAPTCHA token received: ${recaptchaToken ? "Yes" : "No"}`)
+    console.log(`🔍 Firebase token verification for store: ${req.storeId}, phone: ${phone}`)
     console.log(`🔥 Firebase ID token received: ${firebaseIdToken ? "Yes" : "No"}`)
 
     // Validation
@@ -129,24 +110,8 @@ router.post("/verify-otp", async (req, res) => {
       return res.status(400).json({
         error: "Phone number and Firebase ID token are required",
         code: "MISSING_CREDENTIALS",
+        hint: "Use Firebase client SDK to verify OTP and get ID token first",
       })
-    }
-
-    // Verify reCAPTCHA if token is provided
-    if (recaptchaToken) {
-      const clientIP = req.ip || req.connection.remoteAddress
-      const recaptchaResult = await RecaptchaUtils.verifyRecaptcha(recaptchaToken, clientIP)
-
-      if (!recaptchaResult.success) {
-        console.error("❌ reCAPTCHA verification failed:", recaptchaResult.error)
-        return res.status(400).json({
-          error: "reCAPTCHA verification failed",
-          details: recaptchaResult.error,
-          code: "RECAPTCHA_FAILED",
-        })
-      }
-
-      console.log(`✅ reCAPTCHA verified with score: ${recaptchaResult.score}`)
     }
 
     // Verify Firebase ID token
@@ -156,10 +121,11 @@ router.post("/verify-otp", async (req, res) => {
     try {
       decodedToken = await auth.verifyIdToken(firebaseIdToken)
       console.log(`✅ Firebase ID token verified for UID: ${decodedToken.uid}`)
+      console.log(`📱 Token phone: ${decodedToken.phone_number}`)
     } catch (error) {
       console.error("❌ Firebase ID token verification failed:", error)
       return res.status(400).json({
-        error: "Invalid Firebase authentication",
+        error: "Invalid Firebase authentication token",
         details: error.message,
         code: "FIREBASE_TOKEN_INVALID",
       })
@@ -172,7 +138,7 @@ router.post("/verify-otp", async (req, res) => {
         requestPhone: phone,
       })
       return res.status(400).json({
-        error: "Phone number mismatch",
+        error: "Phone number mismatch between token and request",
         code: "PHONE_MISMATCH",
       })
     }
@@ -283,9 +249,9 @@ router.post("/verify-otp", async (req, res) => {
     console.log("✅ Firebase phone authentication successful")
     res.json(response)
   } catch (error) {
-    console.error("❌ Firebase OTP verification error:", error)
+    console.error("❌ Firebase token verification error:", error)
     res.status(500).json({
-      error: "Failed to verify phone authentication",
+      error: "Failed to verify Firebase authentication",
       details: error.message,
       code: "PHONE_VERIFICATION_ERROR",
     })
@@ -326,32 +292,6 @@ router.get("/firebase-config", (req, res) => {
     console.error("❌ Error getting Firebase config:", error)
     res.status(500).json({
       error: "Failed to get Firebase configuration",
-      code: "CONFIG_ERROR",
-    })
-  }
-})
-
-// Get reCAPTCHA configuration for client
-router.get("/recaptcha-config", (req, res) => {
-  try {
-    const siteKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY
-
-    if (!siteKey) {
-      return res.status(500).json({
-        error: "reCAPTCHA not configured",
-        code: "RECAPTCHA_NOT_CONFIGURED",
-      })
-    }
-
-    res.json({
-      success: true,
-      siteKey: siteKey,
-      message: "reCAPTCHA configuration ready",
-    })
-  } catch (error) {
-    console.error("❌ Error getting reCAPTCHA config:", error)
-    res.status(500).json({
-      error: "Failed to get reCAPTCHA configuration",
       code: "CONFIG_ERROR",
     })
   }
