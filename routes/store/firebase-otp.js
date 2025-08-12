@@ -88,22 +88,16 @@ router.post("/send-otp", async (req, res) => {
         console.log(`✅ Firebase user created: ${phone}`)
       }
 
-      const otpResult = await CustomerOTP.createOTP(phone, req.tenantId, purpose, {
+      const otp = await CustomerOTP.createOTP(phone, req.tenantId, purpose, {
         userAgent: req.get("User-Agent"),
         ip: req.ip,
         storeId: req.storeId,
       })
 
-      if (!otpResult.success) {
-        return res.status(500).json({
-          error: "Failed to generate OTP",
-          details: otpResult.error,
-          code: "OTP_GENERATION_ERROR",
-        })
-      }
+      console.log(`✅ OTP generated successfully: ${otp}`)
 
       const storeName = req.storeInfo?.name || "Store"
-      const smsResult = await sendCustomerOTP(phone, otpResult.otp, storeName)
+      const smsResult = await sendCustomerOTP(phone, otp, storeName)
 
       if (!smsResult.success) {
         return res.status(500).json({
@@ -113,7 +107,7 @@ router.post("/send-otp", async (req, res) => {
         })
       }
 
-      console.log(`✅ OTP sent via SMS to ${phone}: ${otpResult.otp}`)
+      console.log(`✅ OTP sent via SMS to ${phone}: ${otp}`)
 
       res.json({
         success: true,
