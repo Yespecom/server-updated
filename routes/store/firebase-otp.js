@@ -104,6 +104,7 @@ router.post("/verify-otp", async (req, res) => {
 
     console.log(`🔍 Firebase token verification for store: ${req.storeId}, phone: ${phone}`)
     console.log(`🔥 Firebase ID token received: ${firebaseIdToken ? "Yes" : "No"}`)
+    console.log(`🎯 Purpose: ${purpose}`)
 
     // Validation
     if (!phone || !firebaseIdToken) {
@@ -147,19 +148,17 @@ router.post("/verify-otp", async (req, res) => {
 
     const Customer = require("../../models/tenant/Customer")(req.tenantDB)
 
-    // Find or create customer in local database
+    // Find existing customer in local database
     let customer = await Customer.findOne({ phone: phone })
+    let isNewCustomer = false
+    let accountStatus = "existing"
+
+    console.log(`🔍 Searching for existing customer with phone: ${phone}`)
 
     if (!customer) {
-      if (purpose === "login") {
-        return res.status(404).json({
-          error: "No account found with this phone number",
-          code: "CUSTOMER_NOT_FOUND",
-          canRegister: true,
-        })
-      }
+      // Create new customer account
+      console.log(`👤 No existing customer found for ${phone}, creating new account...`)
 
-      // Create new customer for registration
       const customerName = name || decodedToken.name || "User"
       const customerEmail = email || decodedToken.email || ""
 
@@ -183,24 +182,41 @@ router.post("/verify-otp", async (req, res) => {
       })
 
       await customer.save()
-      console.log(`👤 New customer registered: ${phone}`)
+      isNewCustomer = true
+      accountStatus = "created"
+      console.log(`✅ New customer account created for ${phone} with ID: ${customer._id}`)
     } else {
       // Update existing customer
+      console.log(`👤 Found existing customer for ${phone} with ID: ${customer._id}`)
+      console.log(`📊 Customer stats - Orders: ${customer.totalOrders}, Spent: ₹${customer.totalSpent}`)
+
       customer.phoneVerified = true
       customer.isVerified = true
       customer.lastLoginAt = new Date()
-      customer.firebaseUid = decodedToken.uid
 
-      if (name && name.trim()) {
-        customer.name = name.trim()
+      // Update Firebase UID if not set
+      if (!customer.firebaseUid) {
+        customer.firebaseUid = decodedToken.uid
+        console.log(`🔗 Updated Firebase UID for existing customer: ${customer._id}`)
       }
-      if (email && email.trim()) {
+
+      // Update name and email if provided
+      if (name && name.trim() && name.trim() !== customer.name) {
+        const oldName = customer.name
+        customer.name = name.trim()
+        console.log(`📝 Updated customer name from "${oldName}" to "${customer.name}"`)
+      }
+
+      if (email && email.trim() && email.trim() !== customer.email) {
+        const oldEmail = customer.email
         customer.email = email.trim()
         customer.emailVerified = true
+        console.log(`📧 Updated customer email from "${oldEmail}" to "${customer.email}"`)
       }
 
       await customer.save()
-      console.log(`✅ Existing customer authenticated: ${phone}`)
+      accountStatus = "existing"
+      console.log(`✅ Existing customer updated and authenticated: ${phone}`)
     }
 
     // Generate JWT token
@@ -223,8 +239,16 @@ router.post("/verify-otp", async (req, res) => {
       console.warn("⚠️ Failed to create custom token:", error.message)
     }
 
+    // Determine appropriate message based on account status
+    let message
+    if (isNewCustomer) {
+      message = purpose === "registration" ? "Registration successful" : "Account created and login successful"
+    } else {
+      message = purpose === "registration" ? "Account already exists - Login successful" : "Login successful"
+    }
+
     const response = {
-      message: purpose === "registration" ? "Registration successful" : "Login successful",
+      message: message,
       token,
       customer: {
         id: customer._id,
@@ -236,6 +260,9 @@ router.post("/verify-otp", async (req, res) => {
         isVerified: customer.isVerified,
         phoneVerified: customer.phoneVerified,
         preferences: customer.preferences,
+        tier: customer.tier, // Virtual field from Customer model
+        createdAt: customer.createdAt,
+        lastLoginAt: customer.lastLoginAt,
       },
       storeId: req.storeId,
       tenantId: req.tenantId,
@@ -244,9 +271,17 @@ router.post("/verify-otp", async (req, res) => {
       authMethod: "firebase_phone_auth",
       firebaseUid: decodedToken.uid,
       firebaseCustomToken: customToken,
+      isNewCustomer: isNewCustomer,
+      accountStatus: accountStatus, // 'existing', 'created'
     }
 
-    console.log("✅ Firebase phone authentication successful")
+    console.log(`✅ Firebase phone authentication successful`)
+    console.log(`📊 Account Status: ${accountStatus}`)
+    console.log(`👤 Customer ID: ${customer._id}`)
+    console.log(`📱 Phone: ${customer.phone}`)
+    console.log(`💰 Total Spent: ₹${customer.totalSpent}`)
+    console.log(`📦 Total Orders: ${customer.totalOrders}`)
+
     res.json(response)
   } catch (error) {
     console.error("❌ Firebase token verification error:", error)
