@@ -1,113 +1,83 @@
 const express = require("express")
 const admin = require("firebase-admin")
 const jwt = require("jsonwebtoken")
-const { connectTenantDB } = require("../../config/tenantDB")
 const Customer = require("../../models/tenant/Customer")
-const storeContext = require("../../middleware/storeContext")
+const { connectTenantDB } = require("../../config/tenantDB")
 
 const router = express.Router()
 
-// Apply store context middleware
-router.use(storeContext)
+// Initialize Firebase Admin SDK if not already initialized
+if (!admin.apps.length) {
+  const serviceAccount = {
+    type: process.env.FIREBASE_TYPE,
+    project_id: process.env.FIREBASE_PROJECT_ID,
+    private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
+    private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+    client_email: process.env.FIREBASE_CLIENT_EMAIL,
+    client_id: process.env.FIREBASE_CLIENT_ID,
+    auth_uri: process.env.FIREBASE_AUTH_URI,
+    token_uri: process.env.FIREBASE_TOKEN_URI,
+    auth_provider_x509_cert_url: process.env.FIREBASE_AUTH_PROVIDER_X509_CERT_URL,
+    client_x509_cert_url: process.env.FIREBASE_CLIENT_X509_CERT_URL,
+  }
+
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    projectId: process.env.FIREBASE_PROJECT_ID,
+  })
+}
 
 // Test Firebase connection
 router.get("/test-firebase", async (req, res) => {
   try {
+    const testToken = "test-token"
     console.log("🔥 Testing Firebase Admin SDK...")
 
-    // Check if Firebase Admin is initialized
-    if (!admin.apps.length) {
-      return res.status(500).json({
-        error: "Firebase Admin SDK not initialized",
-        code: "FIREBASE_NOT_INITIALIZED",
-      })
+    // Try to verify a dummy token (this will fail but shows Firebase is connected)
+    try {
+      await admin.auth().verifyIdToken(testToken)
+    } catch (error) {
+      if (error.code === "auth/argument-error") {
+        console.log("✅ Firebase Admin SDK is properly initialized")
+        return res.json({
+          success: true,
+          message: "Firebase Admin SDK is working",
+          projectId: process.env.FIREBASE_PROJECT_ID,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL?.substring(0, 20) + "...",
+        })
+      }
+      throw error
     }
-
-    // Test Firebase Auth
-    const auth = admin.auth()
-    console.log("✅ Firebase Auth instance created")
-
-    res.json({
-      success: true,
-      message: "Firebase Admin SDK is working correctly",
-      projectId: admin.app().options.projectId,
-      timestamp: new Date().toISOString(),
-    })
   } catch (error) {
-    console.error("❌ Firebase test error:", error)
+    console.error("❌ Firebase Admin SDK error:", error)
     res.status(500).json({
-      error: "Firebase test failed",
+      success: false,
+      error: "Firebase Admin SDK not properly configured",
       details: error.message,
-      code: "FIREBASE_TEST_FAILED",
     })
   }
 })
 
 // Get Firebase client configuration
 router.get("/firebase-config", (req, res) => {
-  try {
-    const config = {
-      apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-      authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-      projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-      storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-      messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-      appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-      measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
-    }
-
-    // Check if all required config is present
-    const missingConfig = Object.entries(config)
-      .filter(([key, value]) => !value)
-      .map(([key]) => key)
-
-    if (missingConfig.length > 0) {
-      return res.status(400).json({
-        error: "Missing Firebase configuration",
-        missingConfig,
-        code: "MISSING_CONFIG",
-      })
-    }
-
-    res.json({
-      success: true,
-      config,
-      message: "Firebase client configuration is complete",
-    })
-  } catch (error) {
-    console.error("❌ Firebase config error:", error)
-    res.status(500).json({
-      error: "Failed to get Firebase configuration",
-      details: error.message,
-      code: "CONFIG_ERROR",
-    })
-  }
+  res.json({
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY ? "✅ Set" : "❌ Missing",
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ? "✅ Set" : "❌ Missing",
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ? "✅ Set" : "❌ Missing",
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ? "✅ Set" : "❌ Missing",
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ? "✅ Set" : "❌ Missing",
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID ? "✅ Set" : "❌ Missing",
+  })
 })
 
-// Send OTP endpoint (for logging purposes - actual SMS sent by Firebase client SDK)
+// Send OTP endpoint (Firebase client handles this)
 router.post("/send-otp", async (req, res) => {
   try {
-    const { phone, purpose = "registration" } = req.body
-    const { storeId, tenantId } = req.storeContext
+    const { phone, purpose } = req.body
 
-    console.log(`📱 Firebase OTP request received:`, {
-      phone,
-      purpose,
-      storeId,
-      tenantId,
-      timestamp: new Date().toISOString(),
-    })
+    console.log(`📱 OTP request received for ${purpose}:`, phone)
 
-    if (!phone) {
-      return res.status(400).json({
-        error: "Phone number is required",
-        code: "PHONE_REQUIRED",
-      })
-    }
-
-    // Log the request (actual SMS is sent by Firebase client SDK)
-    console.log(`🔥 Firebase client SDK will send OTP to: ${phone}`)
-
+    // This endpoint is just for logging - Firebase client SDK handles actual SMS sending
     res.json({
       success: true,
       message: "OTP request processed. Firebase will send SMS directly.",
@@ -116,14 +86,13 @@ router.post("/send-otp", async (req, res) => {
       method: "firebase_client_sdk",
       provider: "firebase",
       expiresIn: "10 minutes",
-      timestamp: new Date().toISOString(),
     })
   } catch (error) {
-    console.error("❌ Firebase OTP send error:", error)
+    console.error("❌ Error processing OTP request:", error)
     res.status(500).json({
+      success: false,
       error: "Failed to process OTP request",
       details: error.message,
-      code: "OTP_SEND_FAILED",
     })
   }
 })
@@ -131,22 +100,14 @@ router.post("/send-otp", async (req, res) => {
 // Verify OTP endpoint
 router.post("/verify-otp", async (req, res) => {
   try {
-    const { phone, firebaseIdToken, purpose = "registration", name, email } = req.body
-    const { storeId, tenantId } = req.storeContext
+    const { phone, firebaseIdToken, purpose, name, email } = req.body
+    const storeId = req.storeId
 
-    console.log(`🔍 Firebase OTP verification started:`, {
-      phone,
-      purpose,
-      storeId,
-      tenantId,
-      hasIdToken: !!firebaseIdToken,
-      timestamp: new Date().toISOString(),
-    })
+    console.log(`🔍 Verifying Firebase OTP for ${purpose}:`, phone)
 
-    // Validate required fields
     if (!phone || !firebaseIdToken) {
-      console.log("❌ Missing required fields:", { phone: !!phone, firebaseIdToken: !!firebaseIdToken })
       return res.status(400).json({
+        success: false,
         error: "Phone number and Firebase ID token are required",
         code: "MISSING_CREDENTIALS",
       })
@@ -157,37 +118,38 @@ router.post("/verify-otp", async (req, res) => {
     let decodedToken
     try {
       decodedToken = await admin.auth().verifyIdToken(firebaseIdToken)
-      console.log("✅ Firebase ID token verified:", {
-        uid: decodedToken.uid,
-        phone_number: decodedToken.phone_number,
-        firebase_phone: decodedToken.firebase?.identities?.phone?.[0],
-      })
-    } catch (firebaseError) {
-      console.error("❌ Firebase token verification failed:", firebaseError)
+      console.log("✅ Firebase ID token verified:", decodedToken.uid)
+    } catch (error) {
+      console.error("❌ Firebase token verification failed:", error)
       return res.status(401).json({
+        success: false,
         error: "Invalid Firebase ID token",
-        details: firebaseError.message,
-        code: "INVALID_FIREBASE_TOKEN",
+        code: "INVALID_TOKEN",
       })
     }
 
-    // Verify phone number matches
-    const tokenPhone = decodedToken.phone_number || decodedToken.firebase?.identities?.phone?.[0]
-    if (tokenPhone !== phone) {
-      console.log("❌ Phone number mismatch:", { tokenPhone, requestPhone: phone })
+    // Check if phone number matches
+    if (decodedToken.phone_number !== phone) {
+      console.error("❌ Phone number mismatch:", {
+        tokenPhone: decodedToken.phone_number,
+        requestPhone: phone,
+      })
       return res.status(400).json({
+        success: false,
         error: "Phone number does not match Firebase token",
         code: "PHONE_MISMATCH",
       })
     }
 
     // Connect to tenant database
-    console.log(`🔌 Connecting to tenant database: ${tenantId}`)
-    await connectTenantDB(tenantId)
+    console.log("🔌 Connecting to tenant database...")
+    const tenantDB = await connectTenantDB(storeId)
+    const CustomerModel = tenantDB.model("Customer", Customer.schema)
 
     // Check if customer exists
-    console.log(`🔍 Searching for existing customer with phone: ${phone}`)
-    let customer = await Customer.findOne({ phone })
+    console.log("👤 Searching for existing customer...")
+    let customer = await CustomerModel.findOne({ phone })
+
     let isNewCustomer = false
     let accountStatus = "existing"
 
@@ -196,72 +158,61 @@ router.post("/verify-otp", async (req, res) => {
         id: customer._id,
         name: customer.name,
         phone: customer.phone,
-        email: customer.email,
         totalOrders: customer.totalOrders,
         totalSpent: customer.totalSpent,
-        tier: customer.tier,
-        createdAt: customer.createdAt,
       })
 
-      // Update existing customer with Firebase UID and last login
-      customer.firebaseUid = decodedToken.uid
-      customer.lastLoginAt = new Date()
-
-      // Update name and email if provided and not already set
-      if (name && (!customer.name || customer.name === "User")) {
-        customer.name = name
-      }
-      if (email && !customer.email) {
-        customer.email = email
-      }
-
+      // Update existing customer
+      customer.firebaseUID = decodedToken.uid
+      customer.lastLogin = new Date()
+      if (name && name !== "User") customer.name = name
+      if (email) customer.email = email
       await customer.save()
-      console.log("✅ Existing customer updated with Firebase UID and login time")
+
       accountStatus = "existing"
     } else {
-      console.log("📝 Creating new customer account...")
+      console.log("🆕 Creating new customer account...")
 
       // Create new customer
-      customer = new Customer({
+      customer = new CustomerModel({
         name: name || "User",
         phone,
         email: email || "",
-        firebaseUid: decodedToken.uid,
+        firebaseUID: decodedToken.uid,
         isActive: true,
         totalOrders: 0,
         totalSpent: 0,
         tier: "bronze",
         createdAt: new Date(),
-        lastLoginAt: new Date(),
+        lastLogin: new Date(),
       })
 
       await customer.save()
+      isNewCustomer = true
+      accountStatus = "created"
+
       console.log("✅ New customer created:", {
         id: customer._id,
         name: customer.name,
         phone: customer.phone,
-        email: customer.email,
       })
-
-      isNewCustomer = true
-      accountStatus = "created"
     }
 
     // Generate JWT token
-    const jwtPayload = {
-      customerId: customer._id,
-      phone: customer.phone,
-      name: customer.name,
-      storeId,
-      tenantId,
-      firebaseUid: decodedToken.uid,
-    }
+    const token = jwt.sign(
+      {
+        customerId: customer._id,
+        phone: customer.phone,
+        storeId,
+        firebaseUID: decodedToken.uid,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "30d" },
+    )
 
-    const token = jwt.sign(jwtPayload, process.env.JWT_SECRET, { expiresIn: "30d" })
-    console.log("✅ JWT token generated for customer:", customer._id)
+    console.log(`✅ ${purpose} successful for:`, customer.phone)
 
-    // Prepare response
-    const responseData = {
+    res.json({
       success: true,
       message: isNewCustomer ? "Account created and login successful" : "Login successful",
       token,
@@ -275,29 +226,19 @@ router.post("/verify-otp", async (req, res) => {
         tier: customer.tier,
         isActive: customer.isActive,
         createdAt: customer.createdAt,
-        lastLoginAt: customer.lastLoginAt,
+        lastLogin: customer.lastLogin,
       },
       isNewCustomer,
       accountStatus,
       storeId,
-      tenantId,
-      timestamp: new Date().toISOString(),
-    }
-
-    console.log(`🎉 Firebase authentication successful:`, {
-      customerId: customer._id,
-      phone: customer.phone,
-      accountStatus,
-      isNewCustomer,
+      tenantId: `tenant_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
     })
-
-    res.json(responseData)
   } catch (error) {
-    console.error("❌ Firebase OTP verification error:", error)
+    console.error("❌ Error verifying Firebase OTP:", error)
     res.status(500).json({
-      error: "Firebase OTP verification failed",
+      success: false,
+      error: "Failed to verify OTP",
       details: error.message,
-      code: "VERIFICATION_FAILED",
     })
   }
 })
