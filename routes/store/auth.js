@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken")
 const bcrypt = require("bcryptjs")
 const rateLimit = require("express-rate-limit")
 const AuthUtils = require("../../utils/auth")
+const RecaptchaUtils = require("../../utils/recaptcha") // Added reCAPTCHA utilities import
 const router = express.Router({ mergeParams: true })
 
 // Apply rate limiting to authentication endpoints
@@ -18,7 +19,7 @@ const authRateLimit = rateLimit({
   legacyHeaders: false,
 })
 
-router.use(["/login", "/register"], authRateLimit)
+router.use(["/login", "/register"], authRateLimit, RecaptchaUtils.middleware(true)) // Added reCAPTCHA middleware to authentication endpoints
 
 // Enhanced logging middleware
 router.use((req, res, next) => {
