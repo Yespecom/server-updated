@@ -91,10 +91,18 @@ router.post("/send-otp", async (req, res) => {
         firebaseUid = firebaseUser.user.uid
       }
 
-      // Generate 6-digit OTP
-      const otpCode = Math.floor(100000 + Math.random() * 900000).toString()
+      const firebaseSMSResult = await sendFirebaseOTP(phone)
 
-      // Store OTP in database with Firebase UID
+      if (!firebaseSMSResult.success) {
+        console.error("❌ Firebase SMS sending failed:", firebaseSMSResult.error)
+        return res.status(500).json({
+          error: "Failed to send OTP via Firebase",
+          details: firebaseSMSResult.error,
+          code: "FIREBASE_SMS_ERROR",
+        })
+      }
+
+      // Store the Firebase session info for verification
       const otp = await CustomerOTP.createOTP(
         phone,
         req.tenantId,
@@ -104,26 +112,24 @@ router.post("/send-otp", async (req, res) => {
           ip: req.ip,
           storeId: req.storeId,
           firebaseUid: firebaseUid,
+          firebaseSessionInfo: firebaseSMSResult.sessionInfo, // Store Firebase session info
         },
         10,
-        otpCode,
+        null, // No custom OTP - Firebase handles this
       )
 
-      console.log(`✅ Firebase OTP created for ${phone}: ${otpCode}`)
+      console.log(`✅ Firebase OTP sent to ${phone}`)
 
-      // In a real implementation, you would send SMS here
-      // For now, we'll return the OTP for testing (remove in production)
       res.json({
         success: true,
-        message: "OTP generated successfully",
+        message: "OTP sent successfully via Firebase",
         phone: phone,
         purpose: purpose,
-        method: "firebase_admin",
+        method: "firebase_sms",
         provider: "firebase",
         expiresIn: "10 minutes",
-        // Remove this in production - only for testing
-        testOTP: otpCode,
         firebaseUid: firebaseUid,
+        sessionInfo: firebaseSMSResult.sessionInfo, // Return session info for verification
       })
     } catch (error) {
       console.error("❌ Error generating Firebase OTP:", error)
@@ -143,9 +149,63 @@ router.post("/send-otp", async (req, res) => {
   }
 })
 
+async function sendFirebaseOTP(phoneNumber) {
+  try {
+    const { getFirebaseAuth } = require("../../config/firebase")
+    const auth = getFirebaseAuth()
+
+    // Get access token for Firebase Identity Toolkit API
+    const { GoogleAuth } = require("google-auth-library")
+    const googleAuth = new GoogleAuth({
+      scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+    })
+
+    const authClient = await googleAuth.getClient()
+    const accessToken = await authClient.getAccessToken()
+
+    if (!accessToken.token) {
+      throw new Error("Failed to get access token")
+    }
+
+    const response = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:sendVerificationCode?key=${process.env.NEXT_PUBLIC_FIREBASE_API_KEY}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken.token}`,
+        },
+        body: JSON.stringify({
+          phoneNumber: phoneNumber,
+          recaptchaToken: "bypass", // Use bypass for server-side requests
+        }),
+      },
+    )
+
+    const result = await response.json()
+
+    if (!response.ok) {
+      throw new Error(result.error?.message || "Firebase SMS API error")
+    }
+
+    console.log(`📱 Firebase SMS sent successfully to ${phoneNumber}`)
+
+    return {
+      success: true,
+      sessionInfo: result.sessionInfo,
+    }
+  } catch (error) {
+    console.error("❌ Firebase SMS sending error:", error)
+    return {
+      success: false,
+      error: error.message,
+    }
+  }
+}
+
 router.post("/verify-otp", async (req, res) => {
   try {
-    const { phone, otp, purpose = "login", name, email, rememberMe } = req.body
+    const { phone, otp, sessionInfo, purpose = "login", name, email, rememberMe } = req.body
 
     console.log(`🔍 Firebase OTP verification for store: ${req.storeId}, phone: ${phone}`)
 
@@ -157,17 +217,29 @@ router.post("/verify-otp", async (req, res) => {
       })
     }
 
-    // Verify OTP from database
-    const otpVerification = await CustomerOTP.verifyOTP(phone, otp, req.tenantId, purpose)
+    if (sessionInfo) {
+      const firebaseVerification = await verifyFirebaseOTP(phone, otp, sessionInfo)
 
-    if (!otpVerification.success) {
-      return res.status(400).json({
-        error: otpVerification.error || "Invalid or expired OTP",
-        code: "INVALID_OTP",
-      })
+      if (!firebaseVerification.success) {
+        return res.status(400).json({
+          error: "Invalid or expired OTP",
+          details: firebaseVerification.error,
+          code: "FIREBASE_OTP_INVALID",
+        })
+      }
+
+      console.log(`✅ Firebase OTP verified for ${phone}`)
+    } else {
+      // Fallback to database verification
+      const otpVerification = await CustomerOTP.verifyOTP(phone, otp, req.tenantId, purpose)
+
+      if (!otpVerification.success) {
+        return res.status(400).json({
+          error: otpVerification.error || "Invalid or expired OTP",
+          code: "INVALID_OTP",
+        })
+      }
     }
-
-    console.log(`✅ Firebase OTP verified for ${phone}`)
 
     // Get Firebase user
     const firebaseUser = await getUserByPhone(phone)
@@ -283,6 +355,58 @@ router.post("/verify-otp", async (req, res) => {
     })
   }
 })
+
+async function verifyFirebaseOTP(phoneNumber, code, sessionInfo) {
+  try {
+    const { GoogleAuth } = require("google-auth-library")
+    const googleAuth = new GoogleAuth({
+      scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+    })
+
+    const authClient = await googleAuth.getClient()
+    const accessToken = await authClient.getAccessToken()
+
+    if (!accessToken.token) {
+      throw new Error("Failed to get access token")
+    }
+
+    // Verify OTP via Firebase Identity Toolkit API
+    const response = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPhoneNumber?key=${process.env.NEXT_PUBLIC_FIREBASE_API_KEY}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken.token}`,
+        },
+        body: JSON.stringify({
+          sessionInfo: sessionInfo,
+          code: code,
+        }),
+      },
+    )
+
+    const result = await response.json()
+
+    if (!response.ok) {
+      throw new Error(result.error?.message || "Firebase OTP verification failed")
+    }
+
+    console.log(`✅ Firebase OTP verification successful for ${phoneNumber}`)
+
+    return {
+      success: true,
+      idToken: result.idToken,
+      refreshToken: result.refreshToken,
+    }
+  } catch (error) {
+    console.error("❌ Firebase OTP verification error:", error)
+    return {
+      success: false,
+      error: error.message,
+    }
+  }
+}
 
 // Get Firebase configuration for client
 router.get("/firebase-config", (req, res) => {
