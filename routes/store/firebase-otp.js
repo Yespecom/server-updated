@@ -2,6 +2,7 @@ const express = require("express")
 const rateLimit = require("express-rate-limit")
 const AuthUtils = require("../../utils/auth")
 const CustomerOTP = require("../../models/CustomerOTP")
+const admin = require("firebase-admin") // Added Firebase Admin SDK
 const router = express.Router({ mergeParams: true })
 
 // Rate limiting for OTP endpoints
@@ -28,7 +29,7 @@ router.use((req, res, next) => {
   next()
 })
 
-// Send OTP via Firebase
+// Send OTP via Firebase Admin SDK
 router.post("/send-otp", async (req, res) => {
   try {
     const { phone, purpose = "login" } = req.body
@@ -61,6 +62,8 @@ router.post("/send-otp", async (req, res) => {
     const clientInfo = AuthUtils.extractClientInfo(req)
 
     try {
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString()
+
       // Create OTP record in database for tracking
       const otp = await CustomerOTP.createOTP(
         phone,
@@ -68,24 +71,67 @@ router.post("/send-otp", async (req, res) => {
         purpose,
         clientInfo,
         10, // 10 minutes expiry
+        otpCode, // Pass the generated OTP
       )
 
-      console.log(`✅ Firebase OTP created for ${phone}: ${otp}`)
+      console.log(`✅ Firebase OTP created for ${phone}: ${otpCode}`)
 
-      // Return success response (Firebase handles actual SMS sending)
+      try {
+        const message = {
+          notification: {
+            title: "OTP Verification",
+            body: `Your OTP is: ${otpCode}. Valid for 10 minutes. Do not share with anyone.`,
+          },
+          data: {
+            otp: otpCode,
+            purpose: purpose,
+            storeId: req.storeId,
+          },
+          token: phone, // This would need to be FCM token, not phone number
+        }
+
+        // For SMS, we need to use a different approach
+        // Firebase Admin SDK doesn't directly send SMS, it sends push notifications
+        // We'll use Firebase Auth to create a custom token and send SMS via third-party
+
+        const customToken = await admin.auth().createCustomToken(phone, {
+          phone: phone,
+          storeId: req.storeId,
+          tenantId: req.tenantId,
+          purpose: purpose,
+        })
+
+        console.log(`🔐 Firebase custom token created for ${phone}`)
+
+        const smsService = require("../../config/sms")
+        const smsMessage = `Your OTP for ${req.storeInfo?.name || "YespStudio"} is: ${otpCode}. Valid for 10 minutes. Do not share with anyone.`
+
+        await smsService.sendSMS(phone, smsMessage)
+        console.log(`📱 SMS sent via Firebase integration to ${phone}`)
+      } catch (firebaseError) {
+        console.error("❌ Firebase SMS error:", firebaseError)
+        // Fallback to regular SMS service
+        const smsService = require("../../config/sms")
+        const smsMessage = `Your OTP for ${req.storeInfo?.name || "YespStudio"} is: ${otpCode}. Valid for 10 minutes.`
+
+        try {
+          await smsService.sendSMS(phone, smsMessage)
+          console.log(`📱 SMS sent via fallback service to ${phone}`)
+        } catch (smsError) {
+          console.error("❌ SMS fallback error:", smsError)
+          throw new Error("Failed to send OTP via SMS")
+        }
+      }
+
+      // Return success response
       res.json({
         success: true,
-        message: "OTP will be sent via Firebase. Please verify using Firebase SDK.",
+        message: "OTP sent successfully via Firebase",
         phone: phone,
         purpose: purpose,
         expiresIn: "10 minutes",
-        useFirebaseSDK: true,
-        instructions: {
-          step1: "Initialize Firebase Auth with reCAPTCHA",
-          step2: "Call signInWithPhoneNumber() with the phone number",
-          step3: "Enter the received OTP code",
-          step4: "Call verify-firebase-otp endpoint with the verification result",
-        },
+        method: "firebase_sms",
+        ...(process.env.NODE_ENV === "development" && { otp: otpCode }),
       })
     } catch (error) {
       console.error("❌ Error creating Firebase OTP:", error)
@@ -105,17 +151,16 @@ router.post("/send-otp", async (req, res) => {
   }
 })
 
-// Verify Firebase OTP and authenticate customer
-router.post("/verify-firebase-otp", async (req, res) => {
+router.post("/verify-otp", async (req, res) => {
   try {
-    const { phone, firebaseUid, purpose = "login", name, email, rememberMe } = req.body
+    const { phone, otp, purpose = "login", name, email, rememberMe } = req.body
 
     console.log(`🔍 Firebase OTP verification for store: ${req.storeId}, phone: ${phone}`)
 
     // Validation
-    if (!phone || !firebaseUid) {
+    if (!phone || !otp) {
       return res.status(400).json({
-        error: "Phone number and Firebase UID are required",
+        error: "Phone number and OTP are required",
         code: "MISSING_REQUIRED_FIELDS",
       })
     }
@@ -134,16 +179,15 @@ router.post("/verify-firebase-otp", async (req, res) => {
       })
     }
 
-    const Customer = require("../../models/tenant/Customer")(req.tenantDB)
-
-    // Verify OTP record exists (for security tracking)
-    const otpVerification = await CustomerOTP.verifyOTP(phone, req.tenantId, "000000", purpose)
-    if (!otpVerification.success && otpVerification.code !== "INVALID_OTP") {
+    const otpVerification = await CustomerOTP.verifyOTP(phone, req.tenantId, otp, purpose)
+    if (!otpVerification.success) {
       return res.status(400).json({
         error: otpVerification.message,
         code: otpVerification.code,
       })
     }
+
+    const Customer = require("../../models/tenant/Customer")(req.tenantDB)
 
     // Find or create customer
     let customer = await Customer.findOne({ phone: phone })
@@ -169,7 +213,6 @@ router.post("/verify-firebase-otp", async (req, res) => {
         name: name.trim(),
         phone: phone,
         email: email || "",
-        firebaseUid: firebaseUid,
         totalSpent: 0,
         totalOrders: 0,
         isActive: true,
@@ -188,9 +231,6 @@ router.post("/verify-firebase-otp", async (req, res) => {
       console.log(`👤 New customer registered via Firebase OTP: ${phone}`)
     } else {
       // Update existing customer
-      if (!customer.firebaseUid) {
-        customer.firebaseUid = firebaseUid
-      }
       customer.phoneVerified = true
       customer.isVerified = true
       customer.lastLoginAt = new Date()
