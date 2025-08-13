@@ -1,135 +1,238 @@
-const axios = require("axios")
+// reCAPTCHA v3 utility functions for frontend
+
+interface RecaptchaConfig {
+  enabled: boolean
+  v3: {
+    enabled: boolean
+    siteKey: string
+    scoreThreshold: number
+  }
+  v2: {
+    enabled: boolean
+    siteKey: string
+  }
+}
+
+interface RecaptchaVerificationResult {
+  success: boolean
+  score?: number
+  action?: string
+  error?: string
+  code?: string
+  details?: any
+}
 
 class RecaptchaUtils {
-  /**
-   * Verify reCAPTCHA token on server side
-   * @param {string} token - reCAPTCHA token from client
-   * @param {string} remoteip - Client IP address (optional)
-   * @returns {Promise<{success: boolean, score?: number, action?: string, error?: string}>}
-   */
-  static async verifyRecaptcha(token, remoteip = null) {
+  private config: RecaptchaConfig | null = null
+  private isV3Loaded = false
+  private loadingPromise: Promise<void> | null = null
+
+  // Initialize reCAPTCHA configuration
+  async init(): Promise<RecaptchaConfig | null> {
     try {
-      if (!token) {
-        return {
-          success: false,
-          error: "reCAPTCHA token is required",
-        }
-      }
+      const response = await fetch("/api/recaptcha/config")
+      const data = await response.json()
 
-      const secretKey = process.env.RECAPTCHA_SECRET_KEY
-      if (!secretKey) {
-        console.error("❌ RECAPTCHA_SECRET_KEY not configured")
-        return {
-          success: false,
-          error: "reCAPTCHA not configured",
-        }
-      }
-
-      const verifyUrl = "https://www.google.com/recaptcha/api/siteverify"
-      const params = new URLSearchParams({
-        secret: secretKey,
-        response: token,
-      })
-
-      if (remoteip) {
-        params.append("remoteip", remoteip)
-      }
-
-      const response = await axios.post(verifyUrl, params, {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        timeout: 10000,
-      })
-
-      const result = response.data
-
-      console.log("🔒 reCAPTCHA verification result:", {
-        success: result.success,
-        score: result.score,
-        action: result.action,
-        hostname: result.hostname,
-      })
-
-      if (!result.success) {
-        console.error("❌ reCAPTCHA verification failed:", result["error-codes"])
-        return {
-          success: false,
-          error: "reCAPTCHA verification failed",
-          errorCodes: result["error-codes"],
-        }
-      }
-
-      // For reCAPTCHA v3, check score (0.0 to 1.0, higher is better)
-      if (result.score !== undefined) {
-        const minScore = 0.5 // Adjust threshold as needed
-        if (result.score < minScore) {
-          console.warn(`⚠️ reCAPTCHA score too low: ${result.score} < ${minScore}`)
-          return {
-            success: false,
-            error: "reCAPTCHA score too low",
-            score: result.score,
-          }
-        }
-      }
-
-      return {
-        success: true,
-        score: result.score,
-        action: result.action,
-        hostname: result.hostname,
+      if (data.success) {
+        this.config = data.config
+        console.log("🔒 reCAPTCHA initialized:", {
+          enabled: this.config.enabled,
+          v3Enabled: this.config.v3.enabled,
+          v2Enabled: this.config.v2.enabled,
+        })
+        return this.config
+      } else {
+        console.error("❌ Failed to load reCAPTCHA config:", data.error)
+        return null
       }
     } catch (error) {
-      console.error("❌ reCAPTCHA verification error:", error.message)
+      console.error("❌ reCAPTCHA initialization failed:", error)
+      return null
+    }
+  }
+
+  // Load reCAPTCHA v3 script
+  private async loadV3Script(): Promise<void> {
+    if (this.isV3Loaded || !this.config?.v3.enabled) {
+      return
+    }
+
+    if (this.loadingPromise) {
+      return this.loadingPromise
+    }
+
+    this.loadingPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script")
+      script.src = `https://www.google.com/recaptcha/api.js?render=${this.config!.v3.siteKey}`
+      script.async = true
+      script.defer = true
+
+      script.onload = () => {
+        this.isV3Loaded = true
+        console.log("✅ reCAPTCHA v3 script loaded")
+        resolve()
+      }
+
+      script.onerror = () => {
+        reject(new Error("Failed to load reCAPTCHA v3 script"))
+      }
+
+      document.head.appendChild(script)
+    })
+
+    return this.loadingPromise
+  }
+
+  // Execute reCAPTCHA v3 for specific action
+  async executeV3(action: string): Promise<string> {
+    if (!this.config) {
+      await this.init()
+    }
+
+    if (!this.config?.enabled || !this.config.v3.enabled) {
+      throw new Error("reCAPTCHA v3 is not enabled")
+    }
+
+    await this.loadV3Script()
+
+    if (!window.grecaptcha) {
+      throw new Error("reCAPTCHA v3 not loaded")
+    }
+
+    return new Promise((resolve, reject) => {
+      window.grecaptcha.ready(async () => {
+        try {
+          const token = await window.grecaptcha.execute(this.config!.v3.siteKey, { action })
+          console.log(`✅ reCAPTCHA v3 token generated for action: ${action}`)
+          resolve(token)
+        } catch (error) {
+          console.error(`❌ reCAPTCHA v3 execution failed for action ${action}:`, error)
+          reject(error)
+        }
+      })
+    })
+  }
+
+  // Execute reCAPTCHA for login
+  async executeLogin(): Promise<string> {
+    return this.executeV3("login")
+  }
+
+  // Execute reCAPTCHA for register
+  async executeRegister(): Promise<string> {
+    return this.executeV3("register")
+  }
+
+  // Verify token on server (for testing)
+  async verifyToken(token: string, version = "v3", action?: string): Promise<RecaptchaVerificationResult> {
+    try {
+      const response = await fetch("/api/recaptcha/verify", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          token,
+          version,
+          action,
+        }),
+      })
+
+      const data = await response.json()
+      return data.result || data
+    } catch (error) {
+      console.error("❌ reCAPTCHA verification request failed:", error)
       return {
         success: false,
-        error: "reCAPTCHA verification failed",
+        error: "Verification request failed",
+        details: error,
       }
     }
   }
 
-  /**
-   * Middleware to verify reCAPTCHA token
-   * @param {boolean} required - Whether reCAPTCHA is required (default: true)
-   * @returns {Function} Express middleware
-   */
-  static middleware(required = true) {
-    return async (req, res, next) => {
-      try {
-        const token = req.body.recaptchaToken || req.headers["x-recaptcha-token"]
+  // Add reCAPTCHA token to form data
+  async addTokenToFormData(formData: FormData, action: string): Promise<void> {
+    try {
+      const token = await this.executeV3(action)
+      formData.append("recaptchaToken", token)
+    } catch (error) {
+      console.error("❌ Failed to add reCAPTCHA token to form:", error)
+      throw error
+    }
+  }
 
-        if (!token && required) {
-          return res.status(400).json({
-            error: "reCAPTCHA token is required",
-            code: "RECAPTCHA_REQUIRED",
-          })
-        }
-
-        if (token) {
-          const clientIP = req.ip || req.connection.remoteAddress
-          const verification = await RecaptchaUtils.verifyRecaptcha(token, clientIP)
-
-          if (!verification.success) {
-            return res.status(400).json({
-              error: verification.error || "reCAPTCHA verification failed",
-              code: "RECAPTCHA_FAILED",
-            })
-          }
-
-          // Add verification result to request for use in route handlers
-          req.recaptcha = verification
-        }
-
-        next()
-      } catch (error) {
-        console.error("❌ reCAPTCHA middleware error:", error)
-        return res.status(500).json({
-          error: "reCAPTCHA verification error",
-          code: "RECAPTCHA_ERROR",
-        })
+  // Add reCAPTCHA token to request body
+  async addTokenToBody(body: any, action: string): Promise<any> {
+    try {
+      const token = await this.executeV3(action)
+      return {
+        ...body,
+        recaptchaToken: token,
       }
+    } catch (error) {
+      console.error("❌ Failed to add reCAPTCHA token to body:", error)
+      throw error
+    }
+  }
+
+  // Add reCAPTCHA token to headers
+  async addTokenToHeaders(headers: Record<string, string>, action: string): Promise<Record<string, string>> {
+    try {
+      const token = await this.executeV3(action)
+      return {
+        ...headers,
+        "X-Recaptcha-Token": token,
+      }
+    } catch (error) {
+      console.error("❌ Failed to add reCAPTCHA token to headers:", error)
+      throw error
+    }
+  }
+
+  // Check if reCAPTCHA is enabled
+  isEnabled(): boolean {
+    return this.config?.enabled || false
+  }
+
+  // Check if v3 is enabled
+  isV3Enabled(): boolean {
+    return this.config?.v3.enabled || false
+  }
+
+  // Get configuration
+  getConfig(): RecaptchaConfig | null {
+    return this.config
+  }
+
+  // Get v3 site key
+  getV3SiteKey(): string | null {
+    return this.config?.v3.siteKey || null
+  }
+}
+
+// Create singleton instance
+const recaptchaUtils = new RecaptchaUtils()
+
+// Auto-initialize when DOM is ready
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+      recaptchaUtils.init()
+    })
+  } else {
+    recaptchaUtils.init()
+  }
+}
+
+// Global declaration for grecaptcha
+declare global {
+  interface Window {
+    grecaptcha: {
+      ready: (callback: () => void) => void
+      execute: (siteKey: string, options: { action: string }) => Promise<string>
     }
   }
 }
 
-module.exports = RecaptchaUtils
+export default recaptchaUtils
+export { RecaptchaUtils, type RecaptchaConfig, type RecaptchaVerificationResult }
