@@ -11,7 +11,7 @@ const createRecaptchaMiddleware = (options = {}) => {
 
   return async (req, res, next) => {
     try {
-      console.log(`🔒 reCAPTCHA ${version} middleware started for action: ${action}`)
+      console.log(`🔒 reCAPTCHA ${version} middleware started`)
 
       // Skip if reCAPTCHA is disabled and not required
       if (!recaptchaConfig.enableRecaptcha && !required) {
@@ -38,7 +38,6 @@ const createRecaptchaMiddleware = (options = {}) => {
           error: "reCAPTCHA verification is required",
           code: "RECAPTCHA_REQUIRED",
           version,
-          action,
         })
       }
 
@@ -59,8 +58,8 @@ const createRecaptchaMiddleware = (options = {}) => {
       console.log(`🔍 Verifying reCAPTCHA ${version} token from IP: ${remoteIp}`)
 
       // Override score threshold if provided
-      const originalThreshold = recaptchaConfig.v3ScoreThreshold
       if (scoreThreshold && version === "v3") {
+        const originalThreshold = recaptchaConfig.v3ScoreThreshold
         recaptchaConfig.v3ScoreThreshold = scoreThreshold
         console.log(`🎯 Using custom score threshold: ${scoreThreshold} (default: ${originalThreshold})`)
       }
@@ -70,7 +69,7 @@ const createRecaptchaMiddleware = (options = {}) => {
 
       // Restore original threshold if it was overridden
       if (scoreThreshold && version === "v3") {
-        recaptchaConfig.v3ScoreThreshold = originalThreshold
+        recaptchaConfig.v3ScoreThreshold = Number.parseFloat(process.env.RECAPTCHA_V3_SCORE_THRESHOLD) || 0.5
       }
 
       // Add result to request object
@@ -95,7 +94,6 @@ const createRecaptchaMiddleware = (options = {}) => {
           error: result.error || "reCAPTCHA verification failed",
           code: result.code || "RECAPTCHA_FAILED",
           version,
-          action,
         }
 
         // Add additional info for v3
@@ -105,6 +103,9 @@ const createRecaptchaMiddleware = (options = {}) => {
           }
           if (result.threshold !== undefined) {
             errorResponse.threshold = result.threshold
+          }
+          if (result.action !== undefined) {
+            errorResponse.action = result.action
           }
         }
 
@@ -134,7 +135,6 @@ const createRecaptchaMiddleware = (options = {}) => {
           error: "reCAPTCHA verification failed",
           code: "RECAPTCHA_ERROR",
           version,
-          action,
         })
       }
 
@@ -143,69 +143,47 @@ const createRecaptchaMiddleware = (options = {}) => {
   }
 }
 
-// Predefined middleware for login and register
+// Predefined middleware for common use cases
 const recaptchaMiddleware = {
-  // v3 middlewares for login and register
+  // v3 middlewares for different actions
   v3: {
-    login: createRecaptchaMiddleware({
-      version: "v3",
-      action: "login",
-      required: true,
-    }),
-    register: createRecaptchaMiddleware({
-      version: "v3",
-      action: "register",
-      required: true,
-    }),
+    login: createRecaptchaMiddleware({ version: "v3", action: "login", required: true }),
+    register: createRecaptchaMiddleware({ version: "v3", action: "register", required: true }),
+    forgotPassword: createRecaptchaMiddleware({ version: "v3", action: "forgot_password", required: true }),
+    resetPassword: createRecaptchaMiddleware({ version: "v3", action: "reset_password", required: true }),
+    contact: createRecaptchaMiddleware({ version: "v3", action: "contact", required: true }),
+    newsletter: createRecaptchaMiddleware({ version: "v3", action: "newsletter", required: false }),
+    comment: createRecaptchaMiddleware({ version: "v3", action: "comment", required: true }),
+    order: createRecaptchaMiddleware({ version: "v3", action: "order", required: true }),
+    payment: createRecaptchaMiddleware({ version: "v3", action: "payment", required: true }),
   },
 
-  // v2 middlewares for login and register (fallback)
+  // v2 middlewares
   v2: {
-    login: createRecaptchaMiddleware({
-      version: "v2",
-      required: true,
-    }),
-    register: createRecaptchaMiddleware({
-      version: "v2",
-      required: true,
-    }),
+    login: createRecaptchaMiddleware({ version: "v2", required: true }),
+    register: createRecaptchaMiddleware({ version: "v2", required: true }),
+    forgotPassword: createRecaptchaMiddleware({ version: "v2", required: true }),
+    resetPassword: createRecaptchaMiddleware({ version: "v2", required: true }),
+    contact: createRecaptchaMiddleware({ version: "v2", required: true }),
   },
 
-  // Custom middleware factory
+  // Flexible middleware
   create: createRecaptchaMiddleware,
 
   // Optional middleware (doesn't fail if verification fails)
   optional: {
-    v3: {
-      login: createRecaptchaMiddleware({
-        version: "v3",
-        action: "login",
-        required: false,
-      }),
-      register: createRecaptchaMiddleware({
-        version: "v3",
-        action: "register",
-        required: false,
-      }),
-    },
+    v3: (action) => createRecaptchaMiddleware({ version: "v3", action, required: false }),
+    v2: () => createRecaptchaMiddleware({ version: "v2", required: false }),
   },
 
-  // High security middleware (higher score threshold)
+  // High security middleware (higher score threshold for v3)
   highSecurity: {
-    v3: {
-      login: createRecaptchaMiddleware({
-        version: "v3",
-        action: "login",
-        required: true,
-        scoreThreshold: 0.7,
-      }),
-      register: createRecaptchaMiddleware({
-        version: "v3",
-        action: "register",
-        required: true,
-        scoreThreshold: 0.7,
-      }),
-    },
+    v3: (action) => createRecaptchaMiddleware({ version: "v3", action, required: true, scoreThreshold: 0.7 }),
+  },
+
+  // Low security middleware (lower score threshold for v3)
+  lowSecurity: {
+    v3: (action) => createRecaptchaMiddleware({ version: "v3", action, required: true, scoreThreshold: 0.3 }),
   },
 }
 
