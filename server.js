@@ -106,6 +106,7 @@ app.get("/health", (req, res) => {
 })
 
 // Authentication routes (must come before store routes)
+app.use("/api/recaptcha", require("./routes/recaptcha"))
 app.use(
   "/api/auth",
   (req, res, next) => {
