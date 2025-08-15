@@ -82,8 +82,17 @@ module.exports = (tenantDB) => {
   // Pre-save hook to generate order number
   orderSchema.pre("save", async function (next) {
     if (!this.orderNumber) {
-      const count = await this.constructor.countDocuments()
-      this.orderNumber = `ORD-${Date.now()}-${(count + 1).toString().padStart(4, "0")}`
+      try {
+        const count = await this.constructor.countDocuments()
+        const timestamp = Date.now()
+        const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase()
+        this.orderNumber = `ORD-${timestamp}-${(count + 1).toString().padStart(4, "0")}-${randomSuffix}`
+        console.log(`[v0] Generated order number: ${this.orderNumber}`)
+      } catch (error) {
+        console.error(`[v0] Error generating order number:`, error)
+        // Fallback order number generation
+        this.orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`
+      }
     }
     next()
   })
