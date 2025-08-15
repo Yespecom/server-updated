@@ -89,6 +89,24 @@ module.exports = (tenantDB) => {
           clientId: String,
           clientSecret: String,
         },
+        phonepe: {
+          enabled: {
+            type: Boolean,
+            default: false,
+          },
+          merchantId: String,
+          appId: String,
+          saltKey: String,
+          saltIndex: {
+            type: Number,
+            default: 1,
+          },
+          environment: {
+            type: String,
+            enum: ["sandbox", "production"],
+            default: "sandbox",
+          },
+        },
       },
       shipping: {
         freeShippingEnabled: {
