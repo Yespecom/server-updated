@@ -156,6 +156,8 @@ const recaptchaMiddleware = {
     comment: createRecaptchaMiddleware({ version: "v3", action: "comment", required: true }),
     order: createRecaptchaMiddleware({ version: "v3", action: "order", required: true }),
     payment: createRecaptchaMiddleware({ version: "v3", action: "payment", required: true }),
+    verification: createRecaptchaMiddleware({ version: "v3", action: "verification", required: true }),
+    profile: createRecaptchaMiddleware({ version: "v3", action: "profile", required: true }),
   },
 
   // v2 middlewares
@@ -176,9 +178,12 @@ const recaptchaMiddleware = {
     v2: () => createRecaptchaMiddleware({ version: "v2", required: false }),
   },
 
-  // High security middleware (higher score threshold for v3)
   highSecurity: {
-    v3: (action) => createRecaptchaMiddleware({ version: "v3", action, required: true, scoreThreshold: 0.7 }),
+    v3: (action) => createRecaptchaMiddleware({ version: "v3", action, required: true, scoreThreshold: 0.8 }),
+  },
+
+  mediumSecurity: {
+    v3: (action) => createRecaptchaMiddleware({ version: "v3", action, required: true, scoreThreshold: 0.6 }),
   },
 
   // Low security middleware (lower score threshold for v3)
