@@ -160,7 +160,7 @@ router.post("/verify-otp", async (req, res) => {
       console.log(`👤 No existing customer found for ${phone}, creating new account...`)
 
       const customerName = name || decodedToken.name || "User"
-      const customerEmail = email || decodedToken.email || ""
+      const customerEmail = email || decodedToken.email || null
 
       customer = new Customer({
         name: customerName.trim(),
