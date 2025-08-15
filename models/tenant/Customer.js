@@ -70,12 +70,16 @@ module.exports = (tenantDB) => {
       },
       email: {
         type: String,
-        required: true,
+        required: false,
         unique: true,
+        sparse: true, // Allow multiple null values for unique constraint
         lowercase: true,
         trim: true,
         validate: {
-          validator: AuthUtils.validateEmail,
+          validator: (email) => {
+            // Only validate if email is provided
+            return !email || AuthUtils.validateEmail(email)
+          },
           message: "Please enter a valid email address",
         },
       },
