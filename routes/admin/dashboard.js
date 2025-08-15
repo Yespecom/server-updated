@@ -741,13 +741,28 @@ router.get("/stats", async (req, res) => {
 // Get sales analytics
 router.get("/analytics", async (req, res) => {
   try {
-    const { tenantId } = req.user
+    const tenantId = req.tenantId || req.user?.tenantId
     const { period = "7d" } = req.query
 
-    // Connect to tenant database
-    await getTenantDB(tenantId)
+    console.log(`🔍 Analytics request - tenantId: ${tenantId}`)
 
-    const Order = require("../models/tenant/Order")
+    if (!tenantId) {
+      console.error("❌ No tenantId available in request")
+      return res.status(400).json({ error: "Tenant ID not available" })
+    }
+
+    // Connect to tenant database
+    console.log(`🔌 Creating new DB connection for tenant: ${tenantId}`)
+    const tenantDB = await getTenantDB(tenantId)
+
+    if (!tenantDB) {
+      console.error("❌ Failed to get tenant database")
+      return res.status(500).json({ error: "Database connection failed" })
+    }
+
+    console.log(`✅ Tenant DB Connected: ${tenantId}`)
+
+    const Order = require("../../models/tenant/Order")(tenantDB)
 
     const startDate = new Date()
     switch (period) {
@@ -785,9 +800,10 @@ router.get("/analytics", async (req, res) => {
       },
     ])
 
+    console.log(`✅ Analytics data retrieved successfully for tenant: ${tenantId}`)
     res.json({ analytics })
   } catch (error) {
-    console.error("Analytics error:", error)
+    console.error("❌ Analytics error:", error)
     res.status(500).json({
       error: "Failed to fetch analytics",
     })
