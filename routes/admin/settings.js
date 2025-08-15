@@ -88,6 +88,12 @@ async function handlePaymentUpdate(req, res) {
       razorpayKeySecret: updatedPayment.razorpayKeySecret ? "***HIDDEN***" : "",
       stripeSecretKey: updatedPayment.stripeSecretKey ? "***HIDDEN***" : "",
       phonePeSaltKey: updatedPayment.phonePeSaltKey ? "***HIDDEN***" : "",
+      phonepe: updatedPayment.phonepe
+        ? {
+            ...updatedPayment.phonepe,
+            saltKey: updatedPayment.phonepe.saltKey ? "***HIDDEN***" : "",
+          }
+        : {},
     }
     res.json({
       message: "Payment settings updated successfully",
@@ -124,6 +130,12 @@ router.get("/", async (req, res) => {
         razorpayKeySecret: settings?.payment?.razorpayKeySecret ? "***HIDDEN***" : "",
         stripeSecretKey: settings?.payment?.stripeSecretKey ? "***HIDDEN***" : "",
         phonePeSaltKey: settings?.payment?.phonePeSaltKey ? "***HIDDEN***" : "",
+        phonepe: settings?.payment?.phonepe
+          ? {
+              ...settings.payment.phonepe,
+              saltKey: settings.payment.phonepe.saltKey ? "***HIDDEN***" : "",
+            }
+          : {},
       },
     }
     res.json(safeSettings)
@@ -189,6 +201,12 @@ router.get("/payment", async (req, res) => {
       razorpayKeySecret: paymentSettings.razorpayKeySecret ? "***HIDDEN***" : "",
       stripeSecretKey: paymentSettings.stripeSecretKey ? "***HIDDEN***" : "",
       phonePeSaltKey: paymentSettings.phonePeSaltKey ? "***HIDDEN***" : "",
+      phonepe: paymentSettings.phonepe
+        ? {
+            ...paymentSettings.phonepe,
+            saltKey: paymentSettings.phonepe.saltKey ? "***HIDDEN***" : "",
+          }
+        : {},
     }
     console.log("✅ Payment settings retrieved")
     res.json(safePaymentSettings)
