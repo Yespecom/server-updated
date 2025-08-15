@@ -8,7 +8,7 @@ const { getTenantDB } = require("../config/tenantDB")
 const { sendOTPEmail, sendWelcomeEmail } = require("../config/email")
 const AuthUtils = require("../utils/auth")
 const rateLimit = require("express-rate-limit")
-const RecaptchaUtils = require("../utils/recaptcha")
+const { recaptchaMiddleware } = require("../middleware/recaptcha")
 
 const router = express.Router()
 
@@ -187,11 +187,13 @@ router.post("/debug/password-test", async (req, res) => {
 })
 
 // Step 1: Initiate Registration (Send OTP)
-router.post("/register/initiate", RecaptchaUtils.middleware(true), async (req, res) => {
+router.post("/register/initiate", recaptchaMiddleware.v3.register, async (req, res) => {
   try {
     const { name, email, phone, password } = req.body
     console.log(`📝 Initiate registration request for: ${email}`)
-    console.log(`🔒 reCAPTCHA verified with score: ${req.recaptcha?.score || "N/A"}`)
+    console.log(
+      `🔒 reCAPTCHA v3 verified with score: ${req.recaptcha?.score || "N/A"} and action: ${req.recaptcha?.action || "N/A"}`,
+    )
 
     // Enhanced validation
     const errors = []
@@ -434,11 +436,13 @@ router.post("/register/complete", async (req, res) => {
 })
 
 // DIRECT LOGIN - Check Main DB then Connect to Tenant DB
-router.post("/login", RecaptchaUtils.middleware(false), async (req, res) => {
+router.post("/login", recaptchaMiddleware.v3.login, async (req, res) => {
   try {
     console.log("🔐 DIRECT LOGIN attempt started")
     if (req.recaptcha) {
-      console.log(`🔒 reCAPTCHA verified with score: ${req.recaptcha.score || "N/A"}`)
+      console.log(
+        `🔒 reCAPTCHA v3 verified with score: ${req.recaptcha.score || "N/A"} and action: ${req.recaptcha.action || "N/A"}`,
+      )
     }
 
     const { email, password, rememberMe } = req.body
@@ -568,11 +572,13 @@ router.post("/login", RecaptchaUtils.middleware(false), async (req, res) => {
 })
 
 // Forgot Password
-router.post("/forgot-password", RecaptchaUtils.middleware(true), async (req, res) => {
+router.post("/forgot-password", recaptchaMiddleware.v3.forgotPassword, async (req, res) => {
   try {
     const { email } = req.body
     console.log(`🔐 Password reset request for: ${email}`)
-    console.log(`🔒 reCAPTCHA verified with score: ${req.recaptcha?.score || "N/A"}`)
+    console.log(
+      `🔒 reCAPTCHA v3 verified with score: ${req.recaptcha?.score || "N/A"} and action: ${req.recaptcha?.action || "N/A"}`,
+    )
 
     if (!email || !AuthUtils.validateEmail(email)) {
       return res.status(400).json({
