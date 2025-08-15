@@ -128,17 +128,23 @@ const createRecaptchaVerifier = (containerId = "recaptcha-container") => {
     const recaptchaVerifier = new RecaptchaVerifier(auth, containerId, {
       size: "invisible",
       callback: (response) => {
-        console.log("✅ reCAPTCHA solved")
+        console.log("✅ reCAPTCHA v3 solved")
       },
       "expired-callback": () => {
-        console.log("❌ reCAPTCHA expired")
+        console.log("❌ reCAPTCHA v3 expired")
+      },
+      // Force v3 configuration
+      "recaptcha-parameters": {
+        sitekey: process.env.NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY || process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY,
+        size: "invisible",
+        badge: "bottomright",
       },
     })
 
-    console.log("✅ reCAPTCHA verifier created for Firebase Auth")
+    console.log("✅ reCAPTCHA v3 verifier created for Firebase Auth")
     return recaptchaVerifier
   } catch (error) {
-    console.error("❌ Error creating reCAPTCHA verifier:", error)
+    console.error("❌ Error creating reCAPTCHA v3 verifier:", error)
     return null
   }
 }
@@ -146,8 +152,9 @@ const createRecaptchaVerifier = (containerId = "recaptcha-container") => {
 // Get reCAPTCHA configuration
 const getRecaptchaConfig = () => {
   return {
-    siteKey: process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY,
-    configured: !!process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY,
+    siteKey: process.env.NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY || process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY,
+    configured: !!(process.env.NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY || process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY),
+    version: "v3",
   }
 }
 
@@ -165,7 +172,8 @@ const isFirebaseClientConfigured = () => {
     hasApiKey: !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
     hasAuthDomain: !!process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
     hasProjectId: !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-    hasRecaptchaSiteKey: !!process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY,
+    hasRecaptchaSiteKey:
+      !!process.env.NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY || !!process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY,
   })
 
   return configured
