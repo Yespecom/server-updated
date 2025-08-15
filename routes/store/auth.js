@@ -236,6 +236,22 @@ router.post("/login", recaptchaMiddleware.v3.login, async (req, res) => {
 
     const Customer = require("../../models/tenant/Customer")(req.tenantDB)
 
+    const existingCustomer = await Customer.findOne({
+      email: email.toLowerCase(),
+      isActive: true,
+    })
+
+    if (!existingCustomer) {
+      console.log(`❌ Customer not found: ${email} - redirecting to signup`)
+      return res.status(404).json({
+        error: "No account found with this email address",
+        code: "CUSTOMER_NOT_FOUND",
+        action: "REDIRECT_TO_SIGNUP",
+        message: "Please create an account first",
+        redirectTo: "signup",
+      })
+    }
+
     // Use the enhanced authentication method
     const authResult = await Customer.authenticate(email, password, req.storeId, req.tenantId)
 
