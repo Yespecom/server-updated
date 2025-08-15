@@ -10,8 +10,7 @@ class RecaptchaConfig {
     this.v3SiteKey = process.env.RECAPTCHA_V3_SITE_KEY
     this.v3SecretKey = process.env.RECAPTCHA_V3_SECRET_KEY
 
-    // Default score threshold for v3
-    this.v3ScoreThreshold = Number.parseFloat(process.env.RECAPTCHA_V3_SCORE_THRESHOLD) || 0.5
+    this.v3ScoreThreshold = Number.parseFloat(process.env.RECAPTCHA_V3_SCORE_THRESHOLD) || 0.6
 
     // Verification URL
     this.verifyUrl = "https://www.google.com/recaptcha/api/siteverify"
