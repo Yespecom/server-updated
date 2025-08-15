@@ -112,6 +112,11 @@ router.get("/test", (req, res) => {
 // Create new order
 router.post("/", authenticateCustomer, async (req, res) => {
   try {
+    console.log(`[v0] Starting order creation process`)
+    console.log(`[v0] Request body:`, JSON.stringify(req.body, null, 2))
+    console.log(`[v0] Customer:`, req.customer?.email)
+    console.log(`[v0] Tenant DB available:`, !!req.tenantDB)
+
     const {
       items,
       shippingAddress,
@@ -131,6 +136,7 @@ router.post("/", authenticateCustomer, async (req, res) => {
 
     // Step 1: Validate items
     if (!items || !Array.isArray(items) || items.length === 0) {
+      console.log(`[v0] Validation failed: Missing items`)
       return res.status(400).json({
         error: "Order items are required",
         code: "MISSING_ITEMS",
@@ -139,6 +145,7 @@ router.post("/", authenticateCustomer, async (req, res) => {
 
     // Step 2: Validate shipping address
     if (!shippingAddress) {
+      console.log(`[v0] Validation failed: Missing shipping address`)
       return res.status(400).json({
         error: "Shipping address is required",
         code: "MISSING_ADDRESS",
@@ -148,6 +155,7 @@ router.post("/", authenticateCustomer, async (req, res) => {
     const requiredFields = ["name", "street", "city", "state", "zipCode"]
     const missingFields = requiredFields.filter((f) => !shippingAddress[f])
     if (missingFields.length > 0) {
+      console.log(`[v0] Validation failed: Missing address fields:`, missingFields)
       return res.status(400).json({
         error: "Incomplete shipping address",
         missingFields,
@@ -158,6 +166,7 @@ router.post("/", authenticateCustomer, async (req, res) => {
     // Step 3: Validate payment method and status
     const validPaymentMethods = ["online", "cod"]
     if (!validPaymentMethods.includes(paymentMethod)) {
+      console.log(`[v0] Validation failed: Invalid payment method:`, paymentMethod)
       return res.status(400).json({
         error: "Invalid payment method",
         code: "INVALID_PAYMENT_METHOD",
@@ -170,6 +179,7 @@ router.post("/", authenticateCustomer, async (req, res) => {
 
     if (paymentMethod === "online") {
       if (!razorpayPaymentId || !razorpayOrderId || !razorpaySignature) {
+        console.log(`[v0] Validation failed: Missing Razorpay payment details`)
         return res.status(400).json({
           error: "Razorpay payment details are required for online payments",
           code: "MISSING_PAYMENT_DETAILS",
@@ -211,15 +221,19 @@ router.post("/", authenticateCustomer, async (req, res) => {
     }
 
     // Step 5: Get Models
+    console.log(`[v0] Loading models from tenant database`)
     const Order = require("../../models/tenant/Order")(req.tenantDB)
     const Product = require("../../models/tenant/Product")(req.tenantDB)
+    console.log(`[v0] Models loaded successfully`)
 
     // Step 6: Validate products and compute totals
     let subtotal = 0
     const orderItems = []
 
+    console.log(`[v0] Validating ${items.length} items`)
     for (const item of items) {
       if (!item.productId || !item.quantity || item.quantity <= 0) {
+        console.log(`[v0] Invalid item data:`, item)
         return res.status(400).json({
           error: "Each item must have a valid productId and quantity",
           code: "INVALID_ITEM_DATA",
@@ -228,6 +242,7 @@ router.post("/", authenticateCustomer, async (req, res) => {
 
       const product = await Product.findById(item.productId)
       if (!product || !product.isActive) {
+        console.log(`[v0] Product not found or inactive:`, item.productId)
         return res.status(400).json({
           error: `Product not found or inactive: ${item.productId}`,
           code: "INVALID_PRODUCT",
@@ -237,6 +252,7 @@ router.post("/", authenticateCustomer, async (req, res) => {
       // Check stock availability
       if (product.inventory && product.inventory.trackQuantity) {
         if (product.inventory.quantity < item.quantity) {
+          console.log(`[v0] Insufficient stock for product:`, product.name)
           return res.status(400).json({
             error: `Insufficient stock for: ${product.name}`,
             code: "INSUFFICIENT_STOCK",
@@ -263,6 +279,7 @@ router.post("/", authenticateCustomer, async (req, res) => {
         }
         product.salesCount = (product.salesCount || 0) + item.quantity
         await product.save()
+        console.log(`[v0] Updated product stock for:`, product.name)
       }
     }
 
@@ -271,6 +288,8 @@ router.post("/", authenticateCustomer, async (req, res) => {
     const shipping = 0 // Free shipping
     const discount = 0 // No discount for now
     const total = subtotal + tax + shipping - discount
+
+    console.log(`[v0] Order totals calculated - Subtotal: ${subtotal}, Tax: ${tax}, Total: ${total}`)
 
     // Step 8: Create Order
     const orderData = {
@@ -294,14 +313,19 @@ router.post("/", authenticateCustomer, async (req, res) => {
       discount,
       total,
       paymentMethod,
-      paymentStatus: finalPaymentStatus, // ✅ Set the correct payment status
+      paymentStatus: finalPaymentStatus,
       notes,
       // Add payment details for online payments
       ...(paymentMethod === "online" && { paymentDetails }),
     }
 
+    console.log(`[v0] Creating new order with data:`, JSON.stringify(orderData, null, 2))
+
     const newOrder = new Order(orderData)
+    console.log(`[v0] Order instance created, saving to database...`)
+
     await newOrder.save() // auto-generates orderNumber in pre("save") hook
+    console.log(`[v0] Order saved successfully with ID: ${newOrder._id}`)
 
     console.log(`✅ Order created successfully: ${newOrder.orderNumber} with payment status: ${finalPaymentStatus}`)
 
@@ -329,6 +353,7 @@ router.post("/", authenticateCustomer, async (req, res) => {
     })
   } catch (error) {
     console.error("❌ Create order error:", error)
+    console.error(`[v0] Full error stack:`, error.stack)
     return res.status(500).json({
       success: false,
       error: "Failed to create order",
@@ -341,18 +366,22 @@ router.post("/", authenticateCustomer, async (req, res) => {
 // Get customer orders
 router.get("/", authenticateCustomer, async (req, res) => {
   try {
+    console.log(`[v0] Starting order fetch process`)
     const customer = req.customer
     const { page = 1, limit = 10, status, sortBy = "createdAt", sortOrder = "desc" } = req.query
 
     console.log(`📋 Getting orders for customer: ${customer.email}`)
+    console.log(`[v0] Query params - page: ${page}, limit: ${limit}, status: ${status}`)
 
     const Order = require("../../models/tenant/Order")(req.tenantDB)
+    console.log(`[v0] Order model loaded from tenant database`)
 
     // Build query
     const query = { customerId: customer._id }
     if (status) {
       query.status = status
     }
+    console.log(`[v0] Query built:`, query)
 
     // Calculate pagination
     const skip = (Number.parseInt(page) - 1) * Number.parseInt(limit)
@@ -360,24 +389,30 @@ router.get("/", authenticateCustomer, async (req, res) => {
     // Build sort object
     const sort = {}
     sort[sortBy] = sortOrder === "desc" ? -1 : 1
+    console.log(`[v0] Sort object:`, sort)
 
     // Get orders
     let orders
     try {
+      console.log(`[v0] Fetching orders with populate...`)
       orders = await Order.find(query)
         .sort(sort)
         .skip(skip)
         .limit(Number.parseInt(limit))
         .populate("items.productId", "name images slug")
         .lean()
+      console.log(`[v0] Orders fetched with populate: ${orders.length} orders`)
     } catch (populateError) {
       console.log("⚠️ Populate failed, loading without populate")
+      console.log(`[v0] Populate error:`, populateError.message)
       orders = await Order.find(query).sort(sort).skip(skip).limit(Number.parseInt(limit)).lean()
+      console.log(`[v0] Orders fetched without populate: ${orders.length} orders`)
     }
 
     // Get total count
     const totalOrders = await Order.countDocuments(query)
     const totalPages = Math.ceil(totalOrders / Number.parseInt(limit))
+    console.log(`[v0] Total orders: ${totalOrders}, Total pages: ${totalPages}`)
 
     console.log(`✅ Found ${orders.length} orders for customer: ${customer.email}`)
 
@@ -401,6 +436,7 @@ router.get("/", authenticateCustomer, async (req, res) => {
     })
   } catch (error) {
     console.error("❌ Get orders error:", error)
+    console.error(`[v0] Full error stack:`, error.stack)
     res.status(500).json({
       success: false,
       error: "Failed to get orders",
