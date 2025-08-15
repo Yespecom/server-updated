@@ -36,6 +36,7 @@ router.post("/send-otp", async (req, res) => {
     const { phone, purpose = "login", name } = req.body
 
     console.log(`📱 Firebase OTP request for store: ${req.storeId}, phone: ${phone}`)
+    console.log(`🔒 Using reCAPTCHA v3 for Firebase phone authentication`)
 
     // Validation
     if (!phone) {
@@ -78,14 +79,19 @@ router.post("/send-otp", async (req, res) => {
 
     res.json({
       success: true,
-      message: "Ready for Firebase phone authentication. Use Firebase client SDK to send OTP.",
+      message: "Ready for Firebase phone authentication with reCAPTCHA v3. Use Firebase client SDK to send OTP.",
       phone: phone,
       purpose: purpose,
       method: "firebase_client_direct",
       provider: "firebase",
+      recaptcha: {
+        version: "v3",
+        siteKey: process.env.NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY || process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY,
+        required: true,
+      },
       expiresIn: "10 minutes",
       otpId: otpRecord._id,
-      instructions: "Use Firebase signInWithPhoneNumber() on client side to send real SMS",
+      instructions: "Use Firebase signInWithPhoneNumber() with reCAPTCHA v3 on client side to send real SMS",
     })
   } catch (error) {
     console.error("❌ Firebase OTP request error:", error)
@@ -306,6 +312,12 @@ router.get("/firebase-config", (req, res) => {
       measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
     }
 
+    const recaptchaConfig = {
+      version: "v3",
+      siteKey: process.env.NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY || process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY,
+      enabled: !!(process.env.NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY || process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY),
+    }
+
     // Check if all required fields are present
     const requiredFields = ["apiKey", "authDomain", "projectId"]
     const missingFields = requiredFields.filter((field) => !config[field])
@@ -321,7 +333,8 @@ router.get("/firebase-config", (req, res) => {
     res.json({
       success: true,
       config: config,
-      message: "Firebase configuration ready for phone authentication",
+      recaptcha: recaptchaConfig,
+      message: "Firebase configuration ready for phone authentication with reCAPTCHA v3",
     })
   } catch (error) {
     console.error("❌ Error getting Firebase config:", error)
