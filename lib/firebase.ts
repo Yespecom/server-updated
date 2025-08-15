@@ -19,10 +19,16 @@ export const createRecaptchaVerifier = (containerId = "recaptcha-container") => 
   return new RecaptchaVerifier(auth, containerId, {
     size: "invisible",
     callback: (response: string) => {
-      console.log("✅ reCAPTCHA solved:", response.substring(0, 20) + "...")
+      console.log("✅ reCAPTCHA v3 solved:", response.substring(0, 20) + "...")
     },
     "expired-callback": () => {
-      console.log("❌ reCAPTCHA expired")
+      console.log("❌ reCAPTCHA v3 expired")
+    },
+    // Force v3 parameters
+    "recaptcha-parameters": {
+      sitekey: process.env.NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY || process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY,
+      size: "invisible",
+      badge: "bottomright",
     },
   })
 }
