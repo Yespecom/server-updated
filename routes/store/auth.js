@@ -41,6 +41,79 @@ router.get("/test", (req, res) => {
   })
 })
 
+router.post("/check-user", async (req, res) => {
+  try {
+    const { email, phone } = req.body
+
+    console.log(`🔍 Checking user existence for store: ${req.storeId}`)
+
+    // Validate input - need at least email or phone
+    if (!email && !phone) {
+      return res.status(400).json({
+        error: "Email or phone number is required",
+        code: "MISSING_IDENTIFIER",
+      })
+    }
+
+    // Build query to find customer by email or phone
+    const query = {}
+    if (email) {
+      if (!AuthUtils.validateEmail(email)) {
+        return res.status(400).json({
+          error: "Invalid email format",
+          code: "INVALID_EMAIL",
+        })
+      }
+      query.email = email.toLowerCase().trim()
+    }
+    if (phone) {
+      if (!AuthUtils.validatePhone(phone)) {
+        return res.status(400).json({
+          error: "Invalid phone format",
+          code: "INVALID_PHONE",
+        })
+      }
+      query.phone = phone.trim()
+    }
+
+    // Use OR query if both email and phone provided
+    const searchQuery = email && phone ? { $or: [{ email: query.email }, { phone: query.phone }] } : query
+
+    // Check if customer exists in tenant database
+    const Customer = require("../../models/tenant/Customer")(req.tenantDB)
+    const existingCustomer = await Customer.findOne(searchQuery)
+
+    if (existingCustomer) {
+      console.log(`✅ Customer found for store ${req.storeId}: ${existingCustomer.email}`)
+      return res.json({
+        exists: true,
+        action: "login",
+        message: "Customer account found. Please login.",
+        customer: {
+          email: existingCustomer.email,
+          name: existingCustomer.name,
+          phone: existingCustomer.phone,
+        },
+      })
+    } else {
+      console.log(`❌ Customer not found for store ${req.storeId}`)
+      return res.json({
+        exists: false,
+        action: "signup",
+        message: "No account found. Please create an account.",
+        redirectTo: "signup",
+      })
+    }
+  } catch (error) {
+    console.error("❌ Check user error:", error)
+    res.status(500).json({
+      error: "Failed to check user existence",
+      details: error.message,
+      code: "CHECK_USER_ERROR",
+    })
+  }
+})
+
 // Enhanced customer registration with reCAPTCHA and longer token expiration
 router.post("/register", recaptchaMiddleware.v3.register, async (req, res) => {
   try {
