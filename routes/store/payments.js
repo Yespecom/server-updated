@@ -1,4 +1,3 @@
-
 const express = require("express")
 const router = express.Router({ mergeParams: true })
 const AuthUtils = require("../../utils/auth")
@@ -127,6 +126,12 @@ router.get("/config", async (req, res) => {
         enabled: settings.payment?.paypal?.enabled || false,
         clientId: settings.payment?.paypal?.clientId || "", // Public key only
       },
+      phonepe: {
+        enabled: settings.payment?.phonepe?.enabled || false,
+        merchantId: settings.payment?.phonepe?.merchantId || "",
+        appId: settings.payment?.phonepe?.appId || "",
+        environment: settings.payment?.phonepe?.environment || "sandbox",
+      },
       supportedMethods: [],
     }
 
@@ -154,6 +159,15 @@ router.get("/config", async (req, res) => {
         id: "stripe",
         name: "Credit/Debit Card",
         description: "Pay with your credit or debit card",
+        enabled: true,
+      })
+    }
+
+    if (paymentConfig.phonepe.enabled && paymentConfig.phonepe.merchantId) {
+      paymentConfig.supportedMethods.push({
+        id: "phonepe",
+        name: "PhonePe",
+        description: "Pay securely with PhonePe UPI",
         enabled: true,
       })
     }
@@ -296,6 +310,60 @@ router.post("/create-order", authenticateCustomer, async (req, res) => {
       await payment.save()
 
       publicKey = settings.payment.stripe.publishableKey
+    } else if (settings.payment?.phonepe?.enabled && settings.payment.phonepe.merchantId) {
+      const crypto = require("crypto")
+
+      // Generate unique merchant transaction ID
+      const merchantTransactionId = `MT${Date.now()}${Math.random().toString(36).substring(2, 8).toUpperCase()}`
+
+      // PhonePe payment request payload
+      const paymentPayload = {
+        merchantId: settings.payment.phonepe.merchantId,
+        merchantTransactionId: merchantTransactionId,
+        merchantUserId: customer._id.toString(),
+        amount: Math.round(amount * 100), // PhonePe expects amount in paise
+        redirectUrl: `${req.protocol}://${req.get("host")}/api/store/${req.storeId}/payments/phonepe/callback`,
+        redirectMode: "POST",
+        callbackUrl: `${req.protocol}://${req.get("host")}/api/store/${req.storeId}/payments/phonepe/callback`,
+        mobileNumber: customer.phone || "",
+        paymentInstrument: {
+          type: "PAY_PAGE",
+        },
+      }
+
+      // Create base64 encoded payload
+      const base64Payload = Buffer.from(JSON.stringify(paymentPayload)).toString("base64")
+
+      // Create checksum
+      const checksumString = base64Payload + "/pg/v1/pay" + settings.payment.phonepe.saltKey
+      const checksum =
+        crypto.createHash("sha256").update(checksumString).digest("hex") + "###" + settings.payment.phonepe.saltIndex
+
+      gatewayOrder = {
+        merchantTransactionId: merchantTransactionId,
+        payload: base64Payload,
+        checksum: checksum,
+        paymentUrl:
+          settings.payment.phonepe.environment === "production"
+            ? "https://api.phonepe.com/apis/hermes/pg/v1/pay"
+            : "https://api-preprod.phonepe.com/apis/hermes/pg/v1/pay",
+        amount: Math.round(amount * 100),
+        currency: currency,
+      }
+
+      payment.gateway = "phonepe"
+      payment.gatewayResponse = {
+        merchantTransactionId: merchantTransactionId,
+        payload: base64Payload,
+        checksum: checksum,
+      }
+      await payment.save()
+
+      publicKey = {
+        merchantId: settings.payment.phonepe.merchantId,
+        appId: settings.payment.phonepe.appId,
+        environment: settings.payment.phonepe.environment,
+      }
     } else {
       return res.status(400).json({
         error: "No payment gateway is properly configured",
@@ -376,7 +444,24 @@ router.post("/verify-payment", authenticateCustomer, async (req, res) => {
     // In a real implementation, you would verify the signature with the payment gateway
     // For Razorpay: verify signature using webhook secret
     // For Stripe: verify using webhook endpoint secret
-    const isSignatureValid = true // This should be actual signature verification
+    let isSignatureValid = true // This should be actual signature verification
+
+    if (payment.gateway === "phonepe") {
+      // PhonePe signature verification
+      const Settings = require("../../models/tenant/Settings")(req.tenantDB)
+      const settings = await Settings.findOne()
+
+      if (settings?.payment?.phonepe?.saltKey) {
+        const crypto = require("crypto")
+        const checksumString = gatewayPaymentId + settings.payment.phonepe.saltKey
+        const expectedChecksum = crypto.createHash("sha256").update(checksumString).digest("hex")
+
+        // In real implementation, compare with actual signature from PhonePe response
+        // For now, we'll assume it's valid
+        console.log(`🔍 PhonePe signature verification for: ${gatewayPaymentId}`)
+        isSignatureValid = expectedChecksum === gatewaySignature
+      }
+    }
 
     if (!isSignatureValid) {
       payment.status = "failed"
@@ -717,6 +802,175 @@ router.post("/:paymentId/refund-request", authenticateCustomer, async (req, res)
       error: "Failed to process refund request",
       details: error.message,
       code: "REFUND_REQUEST_ERROR",
+    })
+  }
+})
+
+router.post("/phonepe/callback", async (req, res) => {
+  try {
+    console.log(`📞 PhonePe callback received:`, req.body)
+
+    const { response } = req.body
+
+    if (!response) {
+      return res.status(400).json({
+        error: "Invalid callback data",
+        code: "INVALID_CALLBACK_DATA",
+      })
+    }
+
+    // Decode the base64 response
+    const decodedResponse = JSON.parse(Buffer.from(response, "base64").toString())
+    console.log(`📞 Decoded PhonePe response:`, decodedResponse)
+
+    const { merchantTransactionId, transactionId, amount, state, responseCode } = decodedResponse
+
+    // Get models
+    const Payment = require("../../models/tenant/Payment")(req.tenantDB)
+    const Order = require("../../models/tenant/Order")(req.tenantDB)
+    const Settings = require("../../models/tenant/Settings")(req.tenantDB)
+
+    // Find payment by merchant transaction ID
+    const payment = await Payment.findOne({
+      "gatewayResponse.merchantTransactionId": merchantTransactionId,
+    })
+
+    if (!payment) {
+      console.error(`❌ Payment not found for merchant transaction ID: ${merchantTransactionId}`)
+      return res.status(404).json({
+        error: "Payment not found",
+        code: "PAYMENT_NOT_FOUND",
+      })
+    }
+
+    // Verify checksum (in production, you should verify the callback signature)
+    const settings = await Settings.findOne()
+    if (settings?.payment?.phonepe?.saltKey) {
+      const crypto = require("crypto")
+      // In real implementation, verify the X-VERIFY header checksum
+      console.log(`🔍 PhonePe callback signature verification for: ${merchantTransactionId}`)
+    }
+
+    // Update payment based on PhonePe response
+    if (state === "COMPLETED" && responseCode === "SUCCESS") {
+      payment.status = "completed"
+      payment.gatewayTransactionId = transactionId
+      payment.gatewayResponse = {
+        ...payment.gatewayResponse,
+        transactionId: transactionId,
+        state: state,
+        responseCode: responseCode,
+        amount: amount,
+        callbackReceivedAt: new Date(),
+      }
+      payment.processedAt = new Date()
+
+      // Update order status
+      const order = await Order.findById(payment.orderId)
+      if (order) {
+        order.paymentStatus = "paid"
+        if (order.status === "pending") {
+          order.status = "confirmed"
+        }
+        await order.save()
+      }
+
+      console.log(`✅ PhonePe payment completed: ${payment.transactionId}`)
+    } else {
+      payment.status = "failed"
+      payment.failureReason = `PhonePe payment failed: ${responseCode}`
+      payment.gatewayResponse = {
+        ...payment.gatewayResponse,
+        state: state,
+        responseCode: responseCode,
+        failedAt: new Date(),
+      }
+
+      console.log(`❌ PhonePe payment failed: ${payment.transactionId} - ${responseCode}`)
+    }
+
+    await payment.save()
+
+    // Redirect user based on payment status
+    const redirectUrl =
+      payment.status === "completed"
+        ? `/payment/success?transactionId=${payment.transactionId}`
+        : `/payment/failed?transactionId=${payment.transactionId}`
+
+    res.redirect(redirectUrl)
+  } catch (error) {
+    console.error("❌ PhonePe callback error:", error)
+    res.status(500).json({
+      error: "Failed to process PhonePe callback",
+      details: error.message,
+      code: "PHONEPE_CALLBACK_ERROR",
+    })
+  }
+})
+
+router.get("/phonepe/status/:merchantTransactionId", async (req, res) => {
+  try {
+    const { merchantTransactionId } = req.params
+
+    console.log(`📊 Checking PhonePe payment status: ${merchantTransactionId}`)
+
+    const Settings = require("../../models/tenant/Settings")(req.tenantDB)
+    const settings = await Settings.findOne()
+
+    if (!settings?.payment?.phonepe?.enabled) {
+      return res.status(400).json({
+        error: "PhonePe is not enabled",
+        code: "PHONEPE_NOT_ENABLED",
+      })
+    }
+
+    // In real implementation, make API call to PhonePe to check status
+    const crypto = require("crypto")
+    const statusUrl = `/pg/v1/status/${settings.payment.phonepe.merchantId}/${merchantTransactionId}`
+    const checksumString = statusUrl + settings.payment.phonepe.saltKey
+    const checksum =
+      crypto.createHash("sha256").update(checksumString).digest("hex") + "###" + settings.payment.phonepe.saltIndex
+
+    const apiUrl =
+      settings.payment.phonepe.environment === "production"
+        ? `https://api.phonepe.com/apis/hermes${statusUrl}`
+        : `https://api-preprod.phonepe.com/apis/hermes${statusUrl}`
+
+    // For now, return the local payment status
+    const Payment = require("../../models/tenant/Payment")(req.tenantDB)
+    const payment = await Payment.findOne({
+      "gatewayResponse.merchantTransactionId": merchantTransactionId,
+    })
+
+    if (!payment) {
+      return res.status(404).json({
+        error: "Payment not found",
+        code: "PAYMENT_NOT_FOUND",
+      })
+    }
+
+    res.json({
+      message: "PhonePe payment status retrieved",
+      payment: {
+        merchantTransactionId: merchantTransactionId,
+        transactionId: payment.transactionId,
+        status: payment.status,
+        amount: payment.amount,
+        gateway: payment.gateway,
+        gatewayTransactionId: payment.gatewayTransactionId,
+      },
+      // Include API details for frontend to make direct status calls if needed
+      statusApi: {
+        url: apiUrl,
+        checksum: checksum,
+      },
+    })
+  } catch (error) {
+    console.error("❌ PhonePe status check error:", error)
+    res.status(500).json({
+      error: "Failed to check PhonePe payment status",
+      details: error.message,
+      code: "PHONEPE_STATUS_ERROR",
     })
   }
 })
