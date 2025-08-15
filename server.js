@@ -105,6 +105,19 @@ app.get("/health", (req, res) => {
   })
 })
 
+app.get("/robots.txt", (req, res) => {
+  console.log("🤖 Robots.txt requested")
+  res.type("text/plain")
+  res.send(`User-agent: *
+Allow: /
+
+# Sitemap (if you have one)
+# Sitemap: https://api.yespstudio.com/sitemap.xml
+
+# Crawl-delay for all bots
+Crawl-delay: 1`)
+})
+
 // Authentication routes (must come before store routes)
 app.use("/api/recaptcha", require("./routes/recaptcha"))
 app.use(
@@ -277,6 +290,7 @@ app.use("*", (req, res) => {
       "/api/password-reset/*",
       "/api/[STORE_ID]/*",
       "/health",
+      "/robots.txt",
     ],
   })
 })
@@ -295,14 +309,16 @@ app.listen(PORT, () => {
   console.log(`📊 Admin Panel: http://localhost:${PORT}/api/admin`)
   console.log(`🛍️ Storefront: http://localhost:${PORT}/api/[STORE_ID]`)
   console.log(`🔧 Health Check: http://localhost:${PORT}/health`)
+  console.log(`🤖 Robots.txt: http://localhost:${PORT}/robots.txt`)
   console.log(``)
   console.log(`🔍 Route Order:`)
   console.log(`  1. /health`)
-  console.log(`  2. /api/auth/*`)
-  console.log(`  3. /api/otp/*`)
-  console.log(`  4. /api/password-reset/*`)
-  console.log(`  5. /api/admin/* (with auth middleware)`)
-  console.log(`  6. /api/:storeId/* (store routes)`)
+  console.log(`  2. /robots.txt`)
+  console.log(`  3. /api/auth/*`)
+  console.log(`  4. /api/otp/*`)
+  console.log(`  5. /api/password-reset/*`)
+  console.log(`  6. /api/admin/* (with auth middleware)`)
+  console.log(`  7. /api/:storeId/* (store routes)`)
 })
 
 module.exports = app
