@@ -67,6 +67,12 @@ module.exports = (tenantDB) => {
       trackingNumber: String,
       estimatedDelivery: Date,
       deliveredAt: Date,
+      paymentDetails: {
+        razorpayPaymentId: String,
+        razorpayOrderId: String,
+        razorpaySignature: String,
+        verifiedAt: Date,
+      },
     },
     {
       timestamps: true,
@@ -88,13 +94,27 @@ module.exports = (tenantDB) => {
         const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase()
         this.orderNumber = `ORD-${timestamp}-${(count + 1).toString().padStart(4, "0")}-${randomSuffix}`
         console.log(`[v0] Generated order number: ${this.orderNumber}`)
+
+        // Verify uniqueness
+        const existing = await this.constructor.findOne({ orderNumber: this.orderNumber })
+        if (existing) {
+          // Generate a new one with additional randomness
+          const extraRandom = Math.random().toString(36).substring(2, 4).toUpperCase()
+          this.orderNumber = `ORD-${timestamp}-${(count + 1).toString().padStart(4, "0")}-${randomSuffix}${extraRandom}`
+          console.log(`[v0] Regenerated unique order number: ${this.orderNumber}`)
+        }
       } catch (error) {
         console.error(`[v0] Error generating order number:`, error)
         // Fallback order number generation
         this.orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`
+        console.log(`[v0] Fallback order number: ${this.orderNumber}`)
       }
     }
     next()
+  })
+
+  orderSchema.post("save", (doc) => {
+    console.log(`[v0] Order post-save hook executed for: ${doc.orderNumber}`)
   })
 
   return tenantDB.models.Order || tenantDB.model("Order", orderSchema)
