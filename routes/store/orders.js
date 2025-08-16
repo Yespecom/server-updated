@@ -112,6 +112,20 @@ router.get("/test", (req, res) => {
 // Create new order
 router.post("/", authenticateCustomer, async (req, res) => {
   try {
+    console.log(`\n🚀 ===== ORDER CREATION API CALLED =====`)
+    console.log(`[v0] Timestamp: ${new Date().toISOString()}`)
+    console.log(`[v0] Request URL: ${req.originalUrl}`)
+    console.log(`[v0] Request Method: ${req.method}`)
+    console.log(`[v0] Request Headers:`, JSON.stringify(req.headers, null, 2))
+    console.log(`[v0] Request Body:`, JSON.stringify(req.body, null, 2))
+    console.log(`[v0] Store ID: ${req.storeId}`)
+    console.log(`[v0] Tenant ID: ${req.tenantId}`)
+    console.log(`[v0] Customer Email: ${req.customer?.email}`)
+    console.log(`[v0] Customer ID: ${req.customerId}`)
+    console.log(`[v0] Auth Token Present: ${!!req.authToken}`)
+    console.log(`[v0] Tenant DB Available: ${!!req.tenantDB}`)
+    console.log(`🚀 ===== STARTING ORDER PROCESSING =====\n`)
+
     console.log(`[v0] Starting order creation process`)
     console.log(`[v0] Request body:`, JSON.stringify(req.body, null, 2))
     console.log(`[v0] Customer:`, req.customer?.email)
@@ -129,6 +143,15 @@ router.post("/", authenticateCustomer, async (req, res) => {
     try {
       await req.tenantDB.db.admin().ping()
       console.log(`[v0] Database connection verified successfully`)
+      console.log(`[v0] Database name:`, req.tenantDB.db.databaseName)
+      console.log(`[v0] Connection state:`, req.tenantDB.connection.readyState)
+
+      // List all collections to verify database structure
+      const collections = await req.tenantDB.db.listCollections().toArray()
+      console.log(
+        `[v0] Available collections:`,
+        collections.map((c) => c.name),
+      )
     } catch (dbError) {
       console.error(`[v0] Database connection test failed:`, dbError)
       return res.status(500).json({
@@ -345,14 +368,43 @@ router.post("/", authenticateCustomer, async (req, res) => {
     const newOrder = new Order(orderData)
     console.log(`[v0] Order instance created, saving to database...`)
 
+    console.log(`[v0] Order model collection name:`, Order.collection.name)
+    console.log(`[v0] Order model database name:`, Order.db.databaseName)
+    console.log(`[v0] Order schema validation:`, newOrder.validateSync())
+
     let savedOrder
     try {
       savedOrder = await newOrder.save()
       console.log(`[v0] Order saved successfully with ID: ${savedOrder._id}`)
       console.log(`[v0] Generated order number: ${savedOrder.orderNumber}`)
+      console.log(`[v0] Saved to collection:`, Order.collection.name)
+      console.log(`[v0] Saved to database:`, Order.db.databaseName)
 
-      // Verify the order was actually saved by querying it back
+      console.log(`[v0] Verifying order save with multiple methods...`)
+
+      // Method 1: Query using the model
       const verifyOrder = await Order.findById(savedOrder._id)
+      console.log(`[v0] Model query verification:`, !!verifyOrder)
+
+      // Method 2: Direct database query
+      const directQuery = await req.tenantDB.db.collection(Order.collection.name).findOne({ _id: savedOrder._id })
+      console.log(`[v0] Direct DB query verification:`, !!directQuery)
+
+      // Method 3: Count documents in collection
+      const totalOrders = await Order.countDocuments()
+      console.log(`[v0] Total orders in collection:`, totalOrders)
+
+      // Method 4: Direct collection count
+      const directCount = await req.tenantDB.db.collection(Order.collection.name).countDocuments()
+      console.log(`[v0] Direct collection count:`, directCount)
+
+      // Method 5: List all orders to see if our order is there
+      const allOrders = await Order.find().limit(5).select("orderNumber _id createdAt")
+      console.log(
+        `[v0] Recent orders in collection:`,
+        allOrders.map((o) => ({ id: o._id, orderNumber: o.orderNumber, createdAt: o.createdAt })),
+      )
+
       if (!verifyOrder) {
         throw new Error("Order save verification failed - order not found in database")
       }
@@ -365,6 +417,17 @@ router.post("/", authenticateCustomer, async (req, res) => {
         code: saveError.code,
         errors: saveError.errors,
       })
+
+      if (saveError.name === "ValidationError") {
+        console.error(
+          `[v0] Validation errors:`,
+          Object.keys(saveError.errors).map((key) => ({
+            field: key,
+            message: saveError.errors[key].message,
+            value: saveError.errors[key].value,
+          })),
+        )
+      }
 
       // Rollback product stock changes if order save failed
       if (finalPaymentStatus === "paid") {
@@ -396,7 +459,7 @@ router.post("/", authenticateCustomer, async (req, res) => {
 
     console.log(`✅ Order created successfully: ${savedOrder.orderNumber} with payment status: ${finalPaymentStatus}`)
 
-    return res.status(201).json({
+    const responseData = {
       success: true,
       message: "Order created successfully",
       order: {
@@ -417,8 +480,31 @@ router.post("/", authenticateCustomer, async (req, res) => {
           },
         }),
       },
-    })
+    }
+
+    console.log(`\n✅ ===== ORDER CREATION SUCCESS =====`)
+    console.log(`[v0] Response Status: 201`)
+    console.log(`[v0] Response Data:`, JSON.stringify(responseData, null, 2))
+    console.log(`[v0] Order Number: ${savedOrder.orderNumber}`)
+    console.log(`[v0] Order ID: ${savedOrder._id}`)
+    console.log(`[v0] Payment Status: ${savedOrder.paymentStatus}`)
+    console.log(`[v0] Database Save Confirmed: YES`)
+    console.log(`[v0] Response Time: ${new Date().toISOString()}`)
+    console.log(`✅ ===== SENDING RESPONSE TO CLIENT =====\n`)
+
+    return res.status(201).json(responseData)
   } catch (error) {
+    console.error(`\n❌ ===== ORDER CREATION ERROR =====`)
+    console.error(`[v0] Error Timestamp: ${new Date().toISOString()}`)
+    console.error(`[v0] Error Name: ${error.name}`)
+    console.error(`[v0] Error Message: ${error.message}`)
+    console.error(`[v0] Error Code: ${error.code}`)
+    console.error(`[v0] Request URL: ${req.originalUrl}`)
+    console.error(`[v0] Customer: ${req.customer?.email}`)
+    console.error(`[v0] Store ID: ${req.storeId}`)
+    console.error(`[v0] Full Error Stack:`, error.stack)
+    console.error(`❌ ===== ERROR DETAILS END =====\n`)
+
     console.error("❌ Create order error:", error)
     console.error(`[v0] Full error stack:`, error.stack)
     return res.status(500).json({
