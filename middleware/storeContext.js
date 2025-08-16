@@ -3,6 +3,17 @@ const User = require("../models/User")
 
 const storeContextMiddleware = async (req, res, next) => {
   try {
+    console.log(`\n🌐 ===== STORE CONTEXT MIDDLEWARE =====`)
+    console.log(`[v0] Timestamp: ${new Date().toISOString()}`)
+    console.log(`[v0] Request Method: ${req.method}`)
+    console.log(`[v0] Original URL: ${req.originalUrl}`)
+    console.log(`[v0] Request Path: ${req.path}`)
+    console.log(`[v0] Request Params:`, req.params)
+    console.log(`[v0] Request Headers:`, JSON.stringify(req.headers, null, 2))
+    console.log(`[v0] User Agent: ${req.get("User-Agent")}`)
+    console.log(`[v0] Request IP: ${req.ip}`)
+    console.log(`🌐 ===== PROCESSING STORE CONTEXT =====\n`)
+
     const { storeId } = req.params // Get storeId from URL path
 
     console.log("🧪 Original URL:", req.originalUrl)
@@ -77,8 +88,25 @@ const storeContextMiddleware = async (req, res, next) => {
       dbState: req.tenantDB?.readyState,
     })
 
+    console.log(`\n✅ ===== STORE CONTEXT SUCCESS =====`)
+    console.log(`[v0] Store ID: ${req.storeId}`)
+    console.log(`[v0] Tenant ID: ${req.tenantId}`)
+    console.log(`[v0] Store Name: ${req.storeInfo?.name}`)
+    console.log(`[v0] Database Ready: ${req.tenantDB?.readyState === 1 ? "YES" : "NO"}`)
+    console.log(`[v0] Proceeding to next middleware/route`)
+    console.log(`✅ ===== CONTEXT SETUP COMPLETE =====\n`)
+
     next()
   } catch (error) {
+    console.error(`\n❌ ===== STORE CONTEXT ERROR =====`)
+    console.error(`[v0] Error Timestamp: ${new Date().toISOString()}`)
+    console.error(`[v0] Request URL: ${req.originalUrl}`)
+    console.error(`[v0] Store ID: ${req.params.storeId}`)
+    console.error(`[v0] Error Name: ${error.name}`)
+    console.error(`[v0] Error Message: ${error.message}`)
+    console.error(`[v0] Error Stack:`, error.stack)
+    console.error(`❌ ===== CONTEXT ERROR END =====\n`)
+
     console.error("❌ Store context middleware error:", error)
     res.status(500).json({
       error: "Store configuration error",
