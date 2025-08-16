@@ -4,17 +4,40 @@ const AuthUtils = require("../utils/auth")
 const customerAuthMiddleware = async (req, res, next) => {
   try {
     console.log("🔐 Customer auth middleware started")
+    console.log("[v0] Request headers:", {
+      authorization: req.header("Authorization"),
+      contentType: req.header("Content-Type"),
+      userAgent: req.header("User-Agent"),
+      origin: req.header("Origin"),
+    })
+    console.log("[v0] Request method:", req.method)
+    console.log("[v0] Request URL:", req.originalUrl)
 
     const authHeader = req.header("Authorization")
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       console.log("❌ No valid customer authorization header")
+      console.log("[v0] Missing/invalid auth header:", {
+        received: authHeader,
+        expected: "Bearer {token}",
+        hasHeader: !!authHeader,
+        startsWithBearer: authHeader ? authHeader.startsWith("Bearer ") : false,
+      })
       return res.status(401).json({
         error: "Access denied. Please login.",
         code: "NO_TOKEN",
+        debug:
+          process.env.NODE_ENV === "development"
+            ? {
+                received: authHeader ? "Header present but invalid format" : "No Authorization header",
+                expected: "Authorization: Bearer {your_jwt_token}",
+              }
+            : undefined,
       })
     }
 
     const token = authHeader.replace("Bearer ", "")
+    console.log("[v0] Extracted token length:", token.length)
+    console.log("[v0] Token preview:", token.substring(0, 20) + "...")
 
     // Verify token
     let decoded
