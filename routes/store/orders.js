@@ -117,6 +117,27 @@ router.post("/", authenticateCustomer, async (req, res) => {
     console.log(`[v0] Customer:`, req.customer?.email)
     console.log(`[v0] Tenant DB available:`, !!req.tenantDB)
 
+    if (!req.tenantDB) {
+      console.error(`[v0] CRITICAL: Tenant database not available`)
+      return res.status(500).json({
+        error: "Database connection not available",
+        code: "DB_CONNECTION_ERROR",
+      })
+    }
+
+    // Test database connection
+    try {
+      await req.tenantDB.db.admin().ping()
+      console.log(`[v0] Database connection verified successfully`)
+    } catch (dbError) {
+      console.error(`[v0] Database connection test failed:`, dbError)
+      return res.status(500).json({
+        error: "Database connection failed",
+        code: "DB_CONNECTION_FAILED",
+        details: dbError.message,
+      })
+    }
+
     const {
       items,
       shippingAddress,
@@ -324,24 +345,70 @@ router.post("/", authenticateCustomer, async (req, res) => {
     const newOrder = new Order(orderData)
     console.log(`[v0] Order instance created, saving to database...`)
 
-    await newOrder.save() // auto-generates orderNumber in pre("save") hook
-    console.log(`[v0] Order saved successfully with ID: ${newOrder._id}`)
+    let savedOrder
+    try {
+      savedOrder = await newOrder.save()
+      console.log(`[v0] Order saved successfully with ID: ${savedOrder._id}`)
+      console.log(`[v0] Generated order number: ${savedOrder.orderNumber}`)
 
-    console.log(`✅ Order created successfully: ${newOrder.orderNumber} with payment status: ${finalPaymentStatus}`)
+      // Verify the order was actually saved by querying it back
+      const verifyOrder = await Order.findById(savedOrder._id)
+      if (!verifyOrder) {
+        throw new Error("Order save verification failed - order not found in database")
+      }
+      console.log(`[v0] Order save verification successful`)
+    } catch (saveError) {
+      console.error(`[v0] CRITICAL: Order save failed:`, saveError)
+      console.error(`[v0] Save error details:`, {
+        name: saveError.name,
+        message: saveError.message,
+        code: saveError.code,
+        errors: saveError.errors,
+      })
+
+      // Rollback product stock changes if order save failed
+      if (finalPaymentStatus === "paid") {
+        console.log(`[v0] Rolling back product stock changes due to save failure`)
+        for (const item of orderItems) {
+          try {
+            const product = await Product.findById(item.productId)
+            if (product) {
+              if (product.inventory && product.inventory.trackQuantity) {
+                product.inventory.quantity += item.quantity
+              }
+              product.salesCount = Math.max(0, (product.salesCount || 0) - item.quantity)
+              await product.save()
+              console.log(`[v0] Rolled back stock for product: ${product.name}`)
+            }
+          } catch (rollbackError) {
+            console.error(`[v0] Rollback failed for product ${item.productId}:`, rollbackError)
+          }
+        }
+      }
+
+      return res.status(500).json({
+        success: false,
+        error: "Failed to save order to database",
+        details: saveError.message,
+        code: "ORDER_SAVE_FAILED",
+      })
+    }
+
+    console.log(`✅ Order created successfully: ${savedOrder.orderNumber} with payment status: ${finalPaymentStatus}`)
 
     return res.status(201).json({
       success: true,
       message: "Order created successfully",
       order: {
-        _id: newOrder._id,
-        orderNumber: newOrder.orderNumber,
-        status: newOrder.status,
-        paymentStatus: newOrder.paymentStatus,
-        paymentMethod: newOrder.paymentMethod,
-        total: newOrder.total,
-        items: newOrder.items,
-        customerInfo: newOrder.customerInfo,
-        createdAt: newOrder.createdAt,
+        _id: savedOrder._id,
+        orderNumber: savedOrder.orderNumber,
+        status: savedOrder.status,
+        paymentStatus: savedOrder.paymentStatus,
+        paymentMethod: savedOrder.paymentMethod,
+        total: savedOrder.total,
+        items: savedOrder.items,
+        customerInfo: savedOrder.customerInfo,
+        createdAt: savedOrder.createdAt,
         ...(paymentMethod === "online" && {
           paymentDetails: {
             razorpayPaymentId,
