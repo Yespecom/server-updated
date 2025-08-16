@@ -222,16 +222,33 @@ router.post("/", authenticateCustomer, async (req, res) => {
     let paymentDetails = {}
 
     if (paymentMethod === "online") {
-      if (!razorpayPaymentId || !razorpayOrderId || !razorpaySignature) {
-        console.log(`[v0] Validation failed: Missing Razorpay payment details`)
+      const missingPaymentFields = []
+      if (!razorpayPaymentId) missingPaymentFields.push("razorpayPaymentId")
+      if (!razorpayOrderId) missingPaymentFields.push("razorpayOrderId")
+      if (!razorpaySignature) missingPaymentFields.push("razorpaySignature")
+
+      if (missingPaymentFields.length > 0) {
+        console.log(`[v0] Validation failed: Missing Razorpay payment fields:`, missingPaymentFields)
+        console.log(`[v0] Received payment data:`, {
+          razorpayPaymentId: razorpayPaymentId ? "✓ Present" : "✗ Missing",
+          razorpayOrderId: razorpayOrderId ? "✓ Present" : "✗ Missing",
+          razorpaySignature: razorpaySignature ? "✓ Present" : "✗ Missing",
+        })
         return res.status(400).json({
           error: "Razorpay payment details are required for online payments",
+          missingFields: missingPaymentFields,
+          receivedFields: {
+            razorpayPaymentId: !!razorpayPaymentId,
+            razorpayOrderId: !!razorpayOrderId,
+            razorpaySignature: !!razorpaySignature,
+          },
           code: "MISSING_PAYMENT_DETAILS",
         })
       }
 
       // Get Razorpay secret from environment or settings
       const razorpaySecret = process.env.RAZORPAY_KEY_SECRET || "your_razorpay_secret"
+      console.log(`[v0] Using Razorpay secret: ${razorpaySecret ? "✓ Present" : "✗ Missing"}`)
 
       // Verify Razorpay signature
       const isValidSignature = verifyRazorpaySignature(
@@ -243,6 +260,12 @@ router.post("/", authenticateCustomer, async (req, res) => {
 
       if (!isValidSignature) {
         console.error("❌ Invalid Razorpay signature")
+        console.log(`[v0] Signature verification details:`, {
+          orderId: razorpayOrderId,
+          paymentId: razorpayPaymentId,
+          providedSignature: razorpaySignature,
+          secretPresent: !!razorpaySecret,
+        })
         return res.status(400).json({
           error: "Payment verification failed",
           code: "PAYMENT_VERIFICATION_FAILED",
